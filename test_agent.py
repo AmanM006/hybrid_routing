@@ -1,0 +1,253 @@
+import unittest
+import json
+import os
+import asyncio
+from unittest.mock import AsyncMock, MagicMock, patch
+
+# Configure env vars for importing main
+os.environ["FIREWORKS_API_KEY"] = "fake_key"
+os.environ["FIREWORKS_BASE_URL"] = "https://api.fireworks.ai/inference/v1"
+os.environ["ALLOWED_MODELS"] = "accounts/fireworks/models/llama-v3p1-8b-instruct,accounts/fireworks/models/llama-v3p1-70b-instruct,accounts/fireworks/models/qwen2p5-coder-32b-instruct"
+
+from classifier import classify_prompt
+from validators import validate_category_output
+from client import get_emergency_fallback
+from main import classify_model_roles
+import main
+
+class TestRoutingAgent(unittest.IsolatedAsyncioTestCase):
+
+    def test_role_classification(self):
+        """
+        Tests parsing allowed_models into appropriate roles.
+        """
+        allowed = [
+            "accounts/fireworks/models/llama-v3p1-405b-instruct",
+            "accounts/fireworks/models/llama-v3p1-70b-instruct",
+            "accounts/fireworks/models/llama-v3p1-8b-instruct",
+            "accounts/fireworks/models/qwen2p5-coder-32b-instruct"
+        ]
+        roles = classify_model_roles(allowed)
+        self.assertEqual(roles["code"], "accounts/fireworks/models/qwen2p5-coder-32b-instruct")
+        self.assertEqual(roles["reasoning"], "accounts/fireworks/models/llama-v3p1-405b-instruct")
+        self.assertEqual(roles["cheap"], "accounts/fireworks/models/llama-v3p1-8b-instruct")
+        self.assertEqual(roles["mid"], "accounts/fireworks/models/llama-v3p1-70b-instruct")
+
+    def test_role_classification_fallback(self):
+        """
+        Tests fallback behavior when only two models are present.
+        """
+        allowed = [
+            "llama-v3p1-8b-instruct",
+            "qwen2p5-coder-32b"
+        ]
+        roles = classify_model_roles(allowed)
+        self.assertEqual(roles["code"], "qwen2p5-coder-32b")
+        self.assertEqual(roles["cheap"], "llama-v3p1-8b-instruct")
+        self.assertEqual(roles["reasoning"], "llama-v3p1-8b-instruct")
+        self.assertEqual(roles["mid"], "llama-v3p1-8b-instruct")
+
+    def test_role_classification_launch_day_fixture(self):
+        """
+        Tests parsing the exact launch day model list provided in feedback.
+        """
+        allowed = [
+            "minimax-m3", 
+            "kimi-k2p7-code", 
+            "gemma-4-31b-it", 
+            "gemma-4-26b-a4b-it", 
+            "gemma-4-31b-it-nvfp4"
+        ]
+        roles = classify_model_roles(allowed)
+        self.assertEqual(roles["code"], "kimi-k2p7-code")
+        self.assertEqual(roles["cheap"], "gemma-4-26b-a4b-it")
+        self.assertEqual(roles["reasoning"], "minimax-m3")
+        self.assertEqual(roles["mid"], "gemma-4-31b-it-nvfp4")
+
+    async def test_task_classification_rules(self):
+        """
+        Tests that keyword-based classifier maps typical prompts correctly.
+        """
+        # Code Generation
+        self.assertEqual(
+            await classify_prompt("Write a python function to find the fibonacci sequence."),
+            "code_generation"
+        )
+        # Code Debugging
+        self.assertEqual(
+            await classify_prompt("Find the bug in this function:\n```python\ndef f(x): return x/0\n```"),
+            "code_debugging"
+        )
+        # Math Reasoning
+        self.assertEqual(
+            await classify_prompt("Solve for x: 3x + 5 = 20"),
+            "math_reasoning"
+        )
+        # Logical Reasoning
+        self.assertEqual(
+            await classify_prompt("Which state of the grid satisfies the puzzle constraints?"),
+            "logical_reasoning"
+        )
+        # Sentiment
+        self.assertEqual(
+            await classify_prompt("Classify the sentiment of this review as positive or negative."),
+            "sentiment_classification"
+        )
+        # Summarization
+        self.assertEqual(
+            await classify_prompt("Summarise the main points of this article in 50 words."),
+            "summarization"
+        )
+        # NER
+        self.assertEqual(
+            await classify_prompt("Extract all the named entities and locations from this paragraph."),
+            "named_entity_recognition"
+        )
+        # Factual Knowledge (Default fallback)
+        self.assertEqual(
+            await classify_prompt("What is the capital city of France?"),
+            "factual_knowledge"
+        )
+
+    async def test_factual_routing_classification(self):
+        """
+        Tests 5+ distinct factual-knowledge sample prompts to confirm they route to
+        factual_knowledge, not sentiment_classification.
+        """
+        factual_prompts = [
+            "What is the capital of Japan?",
+            "Who was the first president of the United States?",
+            "When did the Titanic sink?",
+            "Where is Mount Everest located?",
+            "How many planets are in the Solar System?",
+            "Explain the theory of general relativity in simple terms."
+        ]
+        for prompt in factual_prompts:
+            category = await classify_prompt(prompt)
+            self.assertEqual(category, "factual_knowledge")
+
+    def test_ner_validator(self):
+        """
+        Tests that NER validator accepts valid schemas and rejects invalid ones.
+        """
+        valid_ner = '{"entities": [{"text": "Google", "type": "ORG"}, {"text": "London", "type": "LOCATION"}]}'
+        invalid_ner_json = '{"entities": [{"text": "Google"}]}' # Missing type
+        invalid_ner_key = '{"names": [{"text": "Google", "type": "ORG"}]}' # Wrong key
+        invalid_ner_structure = '{"entities": "Google"}'
+        
+        self.assertTrue(validate_category_output("named_entity_recognition", "", valid_ner))
+        self.assertFalse(validate_category_output("named_entity_recognition", "", invalid_ner_json))
+        self.assertFalse(validate_category_output("named_entity_recognition", "", invalid_ner_key))
+        self.assertFalse(validate_category_output("named_entity_recognition", "", invalid_ner_structure))
+        self.assertFalse(validate_category_output("named_entity_recognition", "", "Not JSON"))
+
+    def test_sentiment_validator(self):
+        """
+        Tests sentiment verification against expected labels.
+        """
+        prompt = "Classify this review (positive/negative/neutral): I loved it!"
+        
+        self.assertTrue(validate_category_output("sentiment_classification", prompt, "positive"))
+        self.assertTrue(validate_category_output("sentiment_classification", prompt, "The sentiment is negative."))
+        self.assertFalse(validate_category_output("sentiment_classification", prompt, "excellent product")) # Missing positive/negative/neutral
+
+        # Justification requested
+        prompt_with_just = "Determine the sentiment (positive/negative) and provide a justification."
+        self.assertTrue(validate_category_output("sentiment_classification", prompt_with_just, "positive because it has excellent features"))
+        self.assertFalse(validate_category_output("sentiment_classification", prompt_with_just, "positive")) # Too short/no justification
+
+    def test_summarization_validator(self):
+        """
+        Tests summary length constraints.
+        """
+        prompt_limit = "Summarize in 5 words or less: the quick brown fox jumps over the lazy dog."
+        self.assertTrue(validate_category_output("summarization", prompt_limit, "Quick brown fox jumps.")) # 4 words
+        # 10 words (exceeds limit + buffer)
+        self.assertFalse(validate_category_output("summarization", prompt_limit, "The quick brown fox jumps over the lazy sleeping dog today."))
+
+    def test_factual_validator(self):
+        """
+        Tests factual response validation.
+        """
+        prompt = "What is gravity?"
+        self.assertTrue(validate_category_output("factual_knowledge", prompt, "Gravity is a fundamental interaction."))
+        self.assertFalse(validate_category_output("factual_knowledge", prompt, "What is gravity?")) # degenerate repetition
+
+    def test_reasoning_validator(self):
+        """
+        Tests math/logic response structure validation.
+        """
+        self.assertTrue(validate_category_output("math_reasoning", "", "Reasoning steps... Answer: 42"))
+        self.assertTrue(validate_category_output("logical_reasoning", "", "Answer is true"))
+        self.assertFalse(validate_category_output("math_reasoning", "", "Reasoning steps only without explicit answer."))
+
+    def test_code_validator(self):
+        """
+        Tests syntax and formatting validation for code.
+        """
+        prompt = "Write a python function."
+        valid_python = "```python\ndef add(a, b):\n    return a + b\n```"
+        invalid_python = "```python\ndef add(a, b):\n    return a + \n```" # Syntax error
+        no_blocks = "def add(a, b): return a + b"
+        
+        self.assertTrue(validate_category_output("code_generation", prompt, valid_python))
+        self.assertFalse(validate_category_output("code_generation", prompt, invalid_python))
+        self.assertFalse(validate_category_output("code_generation", prompt, no_blocks))
+
+class TestMainLoop(unittest.IsolatedAsyncioTestCase):
+
+    async def test_atomic_writing_and_io(self):
+        """
+        Mocking client and running the loop to check that input is processed
+        and output is correctly created containing every task ID.
+        """
+        input_data = [
+            {"task_id": "t1", "prompt": "Identify sentiment: Happy!"},
+            {"task_id": "t2", "prompt": "Solve math: 2+2=?"}
+        ]
+        
+        # Write temporary input file
+        os.makedirs("./input", exist_ok=True)
+        with open("./input/tasks.json", "w") as f:
+            json.dump(input_data, f)
+            
+        mock_client = AsyncMock()
+        mock_client.call_api.return_value = "Answer: positive"
+        
+        roles = {
+            "code": "model-code",
+            "reasoning": "model-reasoning",
+            "cheap": "model-cheap",
+            "mid": "model-mid"
+        }
+        
+        results_map = {
+            t["task_id"]: {"task_id": t["task_id"], "answer": "System interrupted"} for t in input_data
+        }
+        
+        output_path = "./output/results.json"
+        
+        local_sem = asyncio.Semaphore(3)
+        remote_sem = asyncio.Semaphore(12)
+        # Test task executor pipeline
+        with patch('main.local_disabled', True): # Force remote only
+            await main.process_single_task(input_data[0], roles, mock_client, results_map, output_path, local_sem, remote_sem)
+            await main.process_single_task(input_data[1], roles, mock_client, results_map, output_path, local_sem, remote_sem)
+            
+        # Read written output
+        self.assertTrue(os.path.exists(output_path))
+        with open(output_path, "r") as f:
+            output_data = json.load(f)
+            
+        self.assertEqual(len(output_data), 2)
+        self.assertEqual(output_data[0]["task_id"], "t1")
+        self.assertEqual(output_data[1]["task_id"], "t2")
+        
+        # Clean up files
+        if os.path.exists("./input/tasks.json"):
+            os.remove("./input/tasks.json")
+        if os.path.exists(output_path):
+            os.remove(output_path)
+
+if __name__ == "__main__":
+    unittest.main()

@@ -1,0 +1,140 @@
+import re
+import logging
+
+logger = logging.getLogger(__name__)
+
+CATEGORIES = [
+    "factual_knowledge",
+    "math_reasoning",
+    "sentiment_classification",
+    "summarization",
+    "named_entity_recognition",
+    "code_debugging",
+    "logical_reasoning",
+    "code_generation"
+]
+
+# Quick regexes and keyword matchers
+CODE_KEYWORDS = re.compile(
+    r"\b(python|javascript|java|c\+\+|c#|html|css|sql|bash|shell|rust|golang|code|programming|script|function|class|method|develop|implement)\b", 
+    re.IGNORECASE
+)
+DEBUG_KEYWORDS = re.compile(
+    r"\b(debug|fix|bug|error|broken|fail|incorrect|syntax|traceback|exception|crash|wrong|compile|output matches)\b", 
+    re.IGNORECASE
+)
+MATH_KEYWORDS = re.compile(
+    r"\b(solve|equation|calculate|math|integral|derivative|algebra|geometry|trigonometry|matrix|probability|statistics|sum|product|fraction|percentage|ratio|arithmetic|plus|minus|multiplied|divided|equals)\b", 
+    re.IGNORECASE
+)
+LOGIC_KEYWORDS = re.compile(
+    r"\b(puzzle|riddle|logic|deduce|conclude|premise|valid|sequence|pattern|grid|sudoku|knights|knaves|statement|truth|satisfy|rules|constraints|contradiction|if and only if)\b", 
+    re.IGNORECASE
+)
+SENTIMENT_KEYWORDS = re.compile(
+    r"\b(sentiment|classify sentiment|positive|negative|neutral|tone|feeling|angry|happy|sad|review sentiment|opinion)\b", 
+    re.IGNORECASE
+)
+SUMMARIZE_KEYWORDS = re.compile(
+    r"\b(summarize|summarise|summary|tl;dr|tldr|shorten|bullet points|gist|condense|main points|brief overview)\b", 
+    re.IGNORECASE
+)
+NER_KEYWORDS = re.compile(
+    r"\b(extract entities|ner|named entities|extract names|extract places|extract organizations|extract dates|identify people|locations|dates|entities)\b", 
+    re.IGNORECASE
+)
+FACTUAL_KEYWORDS = re.compile(
+    r"\b(what|who|where|when|why|how|which|define|explain|tell|list|describe|capital|president|ceo|born|date|year|history|fact|factual)\b",
+    re.IGNORECASE
+)
+
+async def classify_prompt(prompt: str, local_llm_callable=None) -> str:
+    """
+    Classifies a prompt into one of the 8 categories using regex rules first, 
+    with safety biases toward hard categories, and local LLM as a tie-breaker.
+    """
+    prompt_lower = prompt.lower()
+    
+    # Check for code blocks
+    has_code_block = "```" in prompt
+    
+    # Compute keyword matching scores
+    code_score = len(CODE_KEYWORDS.findall(prompt_lower))
+    debug_score = len(DEBUG_KEYWORDS.findall(prompt_lower))
+    math_score = len(MATH_KEYWORDS.findall(prompt_lower))
+    logic_score = len(LOGIC_KEYWORDS.findall(prompt_lower))
+    sentiment_score = len(SENTIMENT_KEYWORDS.findall(prompt_lower))
+    summarize_score = len(SUMMARIZE_KEYWORDS.findall(prompt_lower))
+    ner_score = len(NER_KEYWORDS.findall(prompt_lower))
+    
+    # Safety bias: Check hard categories first
+    # 1. Code Debugging: has code block or code words AND debugging words
+    if (has_code_block or code_score > 0) and debug_score > 0:
+        return "code_debugging"
+        
+    # 2. Code Generation: contains code keywords or is asking to write a program/function/class
+    if "write a" in prompt_lower or "write python" in prompt_lower or "implement a" in prompt_lower or "create a function" in prompt_lower:
+        if code_score > 0 or has_code_block:
+            return "code_generation"
+            
+    # 3. Math Reasoning: clear math keywords or mathematical expressions
+    # e.g., contains algebraic patterns like x + y = z or digit relations
+    math_symbol_match = re.search(r"[\d\+\-\*\/=\^]+", prompt)
+    if math_score >= 2 or (math_score >= 1 and math_symbol_match and len(math_symbol_match.group(0)) > 2):
+        return "math_reasoning"
+        
+    # 4. Logical Reasoning: logic constraints or puzzle context
+    if logic_score >= 2 or (logic_score >= 1 and ("statement" in prompt_lower or "truth" in prompt_lower)):
+        return "logical_reasoning"
+        
+    # Let's check easy categories
+    # 5. Sentiment
+    if sentiment_score >= 1 or "sentiment" in prompt_lower:
+        return "sentiment_classification"
+        
+    # 6. Summarization
+    if summarize_score >= 1 or "summarize" in prompt_lower or "summarise" in prompt_lower:
+        return "summarization"
+        
+    # 7. NER
+    if ner_score >= 1 or "extract entities" in prompt_lower or "extract names" in prompt_lower:
+        return "named_entity_recognition"
+
+    # 8. Factual Knowledge
+    factual_score = len(FACTUAL_KEYWORDS.findall(prompt_lower))
+    if factual_score >= 1 or "factual" in prompt_lower:
+        return "factual_knowledge"
+
+    # Catch remaining code generation
+    if code_score >= 2 or (code_score >= 1 and "write" in prompt_lower):
+        return "code_generation"
+
+    # If we have any trace of hard categories, fail towards safety!
+    if code_score > 0:
+        return "code_generation"
+    if math_score > 0:
+        return "math_reasoning"
+    if logic_score > 0:
+        return "logical_reasoning"
+
+    # If we have a local model callable, use it as a tie-breaker
+    if local_llm_callable:
+        try:
+            tie_break_prompt = (
+                "Classify the following text into exactly one of these categories: "
+                "factual_knowledge, math_reasoning, sentiment_classification, summarization, "
+                "named_entity_recognition, code_debugging, logical_reasoning, code_generation. "
+                "Only return the category name, nothing else.\n\n"
+                f"Text: {prompt}\n\nCategory:"
+            )
+            raw_resp = await local_llm_callable(tie_break_prompt, max_tokens=15)
+            response = raw_resp.strip().lower()
+            for cat in CATEGORIES:
+                if cat in response:
+                    logger.info(f"Local LLM tie-breaker classified prompt as: {cat}")
+                    return cat
+        except Exception as e:
+            logger.warning(f"Local LLM tie-breaker failed: {e}")
+
+    # Factual Knowledge is the default fallback for general queries
+    return "factual_knowledge"

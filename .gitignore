@@ -1,0 +1,6 @@
+models/
+output/
+.env
+__pycache__/
+*.gguf
+*.log
