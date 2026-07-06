@@ -24,7 +24,7 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # Download precompiled llama-server Ubuntu binary
 RUN curl -L -o /tmp/llama.zip https://github.com/ggml-org/llama.cpp/releases/download/b3620/llama-b3620-bin-ubuntu-x64.zip && \
     unzip /tmp/llama.zip -d /tmp/llama_extracted && \
-    cp /tmp/llama_extracted/llama-server /build/llama-server && \
+    cp /tmp/llama_extracted/build/bin/llama-server /build/llama-server && \
     chmod +x /build/llama-server
 
 # Download local model file
