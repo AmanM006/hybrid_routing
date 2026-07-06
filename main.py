@@ -120,8 +120,8 @@ def classify_model_roles(allowed_models):
     cheap_model = None
     mid_model = None
     
-    # code role: contains "code" or "kimi" case-insensitively
-    code_models = [m for m in allowed_models if any(k in m.lower() for k in ["code", "kimi"])]
+    # code role: contains "code" case-insensitively
+    code_models = [m for m in allowed_models if "code" in m.lower()]
     if code_models:
         code_model = code_models[0]
         
@@ -135,12 +135,8 @@ def classify_model_roles(allowed_models):
         size = 0.0
         
         # 1. Large proprietary/commercial models prioritized as reasoning models
-        if "deepseek" in name_lower:
-            size = 600.0
-        elif "minimax" in name_lower:
+        if any(brand in name_lower for brand in ["minimax", "gpt", "claude"]):
             size = 500.0
-        elif any(brand in name_lower for brand in ["gpt", "claude", "glm"]):
-            size = 400.0
         else:
             # Base parameter size extraction from patterns like -8b, -70b, -405b, -1.5b
             size_match = re.search(r"[-_](\d+(?:\.\d+|p\d+)?)b", name_lower)
