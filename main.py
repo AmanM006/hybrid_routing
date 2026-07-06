@@ -232,12 +232,17 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
                 system_prompt = SYSTEM_PROMPTS.get(category, "Answer the query.")
                 user_prompt = prompt + "\n\nAnswer only. No explanation, no chain-of-thought, no preamble, no restating the question."
                 max_tokens = min(35 if category != "named_entity_recognition" else 70, get_max_tokens(category, prompt))
-                answer = await call_local_model(system_prompt, user_prompt, max_tokens)
+                answer = await asyncio.wait_for(
+                    call_local_model(system_prompt, user_prompt, max_tokens),
+                    timeout=24.0
+                )
                 validation_pass = validate_category_output(category, prompt, answer)
                 if validation_pass:
                     logger.info(f"Task {task_id}: Local model passed validation.")
                 else:
                     logger.info(f"Task {task_id}: Local model failed validation. Escalating to cheap remote...")
+            except asyncio.TimeoutError:
+                logger.warning(f"Task {task_id}: Local model execution timed out. Escalating...")
             except Exception as e:
                 logger.warning(f"Task {task_id}: Local model execution failed: {e}. Escalating...")
             
@@ -371,26 +376,8 @@ async def process_single_task(task, roles, client, results_map, output_path, loc
         return
         
     try:
-        # Wrap task pipeline in 22-second timeout (leaving 8s margin for fallback remote calls)
-        res = await asyncio.wait_for(
-            execute_task_pipeline(task_id, prompt, roles, client, local_sem, remote_sem),
-            timeout=24.0
-        )
+        res = await execute_task_pipeline(task_id, prompt, roles, client, local_sem, remote_sem)
         results_map[task_id] = res
-    except asyncio.TimeoutError:
-        logger.warning(f"Task {task_id} timed out. Activating emergency remote fallback...")
-        try:
-            # Quick direct call to cheap model with 6-second timeout
-            emergency_answer = await client.call_api(
-                model=roles["cheap"],
-                category="factual_knowledge",
-                prompt=prompt,
-                timeout=6.0
-            )
-            results_map[task_id] = {"task_id": task_id, "answer": emergency_answer}
-        except Exception as ex:
-            logger.error(f"Task {task_id} emergency call failed: {ex}")
-            results_map[task_id] = {"task_id": task_id, "answer": get_emergency_fallback("factual_knowledge", prompt)}
     except Exception as e:
         logger.error(f"Task {task_id} failed: {e}")
         results_map[task_id] = {"task_id": task_id, "answer": get_emergency_fallback("factual_knowledge", prompt)}

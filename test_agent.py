@@ -126,6 +126,34 @@ class TestRoutingAgent(unittest.IsolatedAsyncioTestCase):
             category = await classify_prompt(prompt)
             self.assertEqual(category, "factual_knowledge")
 
+    async def test_edge_cases_classification(self):
+        """
+        Tests weird unicode prompts, super long inputs, prompts with no clear category,
+        and multiple languages to ensure robust classification behavior.
+        """
+        # Weird Unicode and emojis
+        unicode_prompt = "🌟 Translate and extract named entities: Mr. Takahashi works at Sony in Tokyo 🇯🇵."
+        self.assertEqual(await classify_prompt(unicode_prompt), "named_entity_recognition")
+
+        # Super long input (5000+ characters)
+        long_prompt = "summarize " + ("hello " * 1000)
+        self.assertEqual(await classify_prompt(long_prompt), "summarization")
+
+        # Prompts with no clear category (should fallback safely)
+        no_clear_prompt = "xyz123abc !!!"
+        self.assertIn(await classify_prompt(no_clear_prompt), [
+            "factual_knowledge", "sentiment_classification", "summarization",
+            "named_entity_recognition", "code_debugging", "logical_reasoning",
+            "code_generation", "math_reasoning"
+        ])
+
+        # Multiple languages (Spanish and French queries)
+        spanish_factual = "Cual es la capital de España?"
+        self.assertEqual(await classify_prompt(spanish_factual), "factual_knowledge")
+
+        french_factual = "Quelle est la capitale de la France?"
+        self.assertEqual(await classify_prompt(french_factual), "factual_knowledge")
+
     def test_ner_validator(self):
         """
         Tests that NER validator accepts valid schemas and rejects invalid ones.
