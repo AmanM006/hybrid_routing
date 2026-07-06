@@ -135,7 +135,7 @@ def classify_model_roles(allowed_models):
         size = 0.0
         
         # 1. Large proprietary/commercial models prioritized as reasoning models
-        if any(brand in name_lower for brand in ["minimax", "gpt", "claude"]):
+        if "minimax" in name_lower:
             size = 500.0
         else:
             # Base parameter size extraction from patterns like -8b, -70b, -405b, -1.5b
