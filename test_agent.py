@@ -64,6 +64,23 @@ class TestRoutingAgent(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(roles["reasoning"], "minimax-m3")
         self.assertEqual(roles["mid"], "gemma-4-31b-it-nvfp4")
 
+    def test_role_classification_live_accounts(self):
+        """
+        Tests parsing the actual next-gen models currently live on the Fireworks account.
+        """
+        allowed = [
+            "accounts/fireworks/models/deepseek-v4-pro",
+            "accounts/fireworks/models/kimi-k2p6",
+            "accounts/fireworks/models/kimi-k2p5",
+            "accounts/fireworks/models/glm-5p1",
+            "accounts/fireworks/models/gpt-oss-120b"
+        ]
+        roles = classify_model_roles(allowed)
+        self.assertEqual(roles["code"], "accounts/fireworks/models/kimi-k2p6")
+        self.assertEqual(roles["reasoning"], "accounts/fireworks/models/deepseek-v4-pro")
+        self.assertEqual(roles["cheap"], "accounts/fireworks/models/glm-5p1")
+        self.assertEqual(roles["mid"], "accounts/fireworks/models/gpt-oss-120b")
+
     async def test_task_classification_rules(self):
         """
         Tests that keyword-based classifier maps typical prompts correctly.
