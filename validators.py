@@ -223,6 +223,24 @@ def validate_category_output(category: str, prompt: str, output: str) -> bool:
     """
     Validates output according to its category rules.
     """
+    if not output or not output.strip():
+        logger.warning("Validation Failed: Output is empty.")
+        return False
+        
+    # Check for word loops/repetition (same word repeated 4+ times)
+    words = output.lower().split()
+    repetition_count = 0
+    last_word = None
+    for w in words:
+        if w == last_word:
+            repetition_count += 1
+            if repetition_count >= 3:
+                logger.warning(f"Validation Failed: Heavy repetition detected ('{w}').")
+                return False
+        else:
+            repetition_count = 0
+            last_word = w
+
     if category == "named_entity_recognition":
         return validate_ner(output)
     elif category == "sentiment_classification":
