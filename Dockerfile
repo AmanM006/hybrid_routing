@@ -28,8 +28,8 @@ RUN curl -L -o /tmp/llama.zip https://github.com/ggml-org/llama.cpp/releases/dow
     chmod +x /build/llama-server
 
 # Download local model file
-COPY download_model.py .
-RUN python download_model.py
+RUN mkdir -p models && \
+    curl -L -o models/qwen2.5-1.5b-instruct-q4_k_m.gguf https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf
 
 # Stage 2: Final runtime image
 FROM --platform=linux/amd64 python:3.11-slim
