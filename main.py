@@ -111,6 +111,64 @@ async def call_local_model(system_prompt: str, user_prompt: str, max_tokens: int
             logger.error(f"HTTP request to local llama-server failed: {e}")
             raise e
 
+async def verify_local_answer(category: str, prompt: str, answer: str) -> bool:
+    """
+    Runs a zero-cost local self-verification check to evaluate confidence.
+    """
+    global local_disabled
+    if local_disabled:
+        return True
+        
+    try:
+        if category == "sentiment_classification":
+            verify_system = "You are a verification assistant. Respond with 'yes' or 'no' only."
+            verify_user = (
+                f"Text: {prompt}\n"
+                f"Proposed Sentiment: {answer}\n\n"
+                "Is the proposed sentiment correct for the text? Answer only 'yes' or 'no'."
+            )
+            val = await call_local_model(verify_system, verify_user, max_tokens=10)
+            return "yes" in val.lower()
+            
+        elif category == "named_entity_recognition":
+            try:
+                start = answer.find('{')
+                end = answer.rfind('}')
+                if start != -1 and end != -1:
+                    data = json.loads(answer[start:end+1])
+                    for entity in data.get("entities", []):
+                        text = entity.get("text", "")
+                        if text and text.lower() not in prompt.lower():
+                            logger.warning(f"NER Verification: Extracted entity '{text}' not found in source text.")
+                            return False
+            except Exception:
+                return False
+                
+        elif category == "summarization":
+            verify_system = "You are a validation assistant. Respond with 'yes' or 'no' only."
+            verify_user = (
+                f"Source: {prompt}\n"
+                f"Summary: {answer}\n\n"
+                "Is the summary factually accurate relative to the source? Answer only 'yes' or 'no'."
+            )
+            val = await call_local_model(verify_system, verify_user, max_tokens=10)
+            return "yes" in val.lower()
+            
+        elif category == "factual_knowledge":
+            verify_system = "You are a verification assistant. Respond with 'yes' or 'no' only."
+            verify_user = (
+                f"Question: {prompt}\n"
+                f"Answer: {answer}\n\n"
+                "Is this answer factually correct? Answer only 'yes' or 'no'."
+            )
+            val = await call_local_model(verify_system, verify_user, max_tokens=10)
+            return "yes" in val.lower()
+            
+        return True
+    except Exception as e:
+        logger.warning(f"Self-verification helper encountered error: {e}")
+        return True
+
 def classify_model_roles(allowed_models):
     """
     Parses allowed_models into code, reasoning, cheap, and mid roles.
@@ -238,9 +296,14 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
                 )
                 validation_pass = validate_category_output(category, prompt, answer)
                 if validation_pass:
-                    logger.info(f"Task {task_id}: Local model passed validation.")
+                    verification_pass = await verify_local_answer(category, prompt, answer)
+                    if verification_pass:
+                        logger.info(f"Task {task_id}: Local model passed validation and self-verification.")
+                    else:
+                        logger.info(f"Task {task_id}: Local model self-verification failed. Escalating...")
+                        validation_pass = False
                 else:
-                    logger.info(f"Task {task_id}: Local model failed validation. Escalating to cheap remote...")
+                    logger.info(f"Task {task_id}: Local model failed structural validation. Escalating to cheap remote...")
             except asyncio.TimeoutError:
                 logger.warning(f"Task {task_id}: Local model execution timed out. Escalating...")
             except Exception as e:
