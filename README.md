@@ -1,38 +1,39 @@
-# Track 1 — Hybrid Token-Efficient Routing Agent
+# Track 1 — Token-Efficient Remote Cascade Routing Agent
 
-A cost-optimal, highly resilient AI routing agent implementing a hybrid inference pipeline for Track 1 of the AMD Developer Hackathon.
+A cost-optimal, highly resilient AI routing agent implementing a multi-model remote inference cascade for Track 1 of the AMD Developer Hackathon.
 
 ## Architecture Overview
 
-The agent utilizes a split-inference strategy to minimize remote token counts and latency while meeting strict LLM-Judge accuracy gates:
+The agent is designed to maximize remote token efficiency and accuracy using an asynchronous cascade pipeline executing entirely against the Fireworks API (using allowed models):
 
 ```mermaid
 graph TD
-    A[Input Tasks] --> B[Task Classifier]
+    A[Input Tasks] --> B[Local Task Classifier]
     
-    B -->|Easy Task: sentiment, factual, summary, NER| C[Local Qwen-2.5-1.5B GGUF]
-    B -->|Hard Task: math, code, logic| D[Direct Remote API]
+    B -->|Easy Task: sentiment, factual, summary, NER| C[Cheap Remote: gemma-4-26b-a4b-it]
+    B -->|Hard Task: math, logic| D[Reasoning Remote: minimax-m3]
+    B -->|Hard Task: code, debugging| E[Code Remote: kimi-k2p7-code]
     
-    C -->|Passes Validator| E[Write Results]
-    C -->|Fails Validator / Timeout| F[Remote Escalation Cascade]
+    C -->|Passes Validator| F[Write Results]
+    C -->|Fails Validator / Error| G[Mid Remote: gemma-4-31b-it-nvfp4]
     
-    F -->|Cheap Remote: gemma-26b-a4b| G[Check Validation]
-    G -->|Passes| E
-    G -->|Fails / Timeout| H[Mid Remote: gemma-31b-nvfp4]
+    G -->|Passes| F
+    G -->|Fails / Error| H[Schema-Compliant Fallback Generator]
+    H --> F
     
-    H -->|Passes| E
-    H -->|Fails| I[Zero-Cost Fallback Generator]
-    I --> E
+    D -->|Passes| F
+    D -->|Fails / Error| H
     
-    D -->|API Success| E
-    D -->|API Failure| J[Dynamic Fallback Generator]
-    J --> E
+    E -->|Passes| F
+    E -->|Fails / Error| H
 ```
 
-1. **Classification Tier**: Classifies task prompts asynchronously using regex rules and keywords (with safety biases toward hard categories).
-2. **Local Tier (Easy Categories)**: Queries a native local `llama-server` process running a quantized **Qwen-2.5-1.5B-Instruct-Q4_K_M.gguf** model.
-3. **Remote Cascade Tier**: Escalates only on validation failures or local timeouts to remote Fireworks API endpoints (`cheap` model $\rightarrow$ `mid` model).
-4. **Resiliency Fallbacks**: Prompts that fail remote models (e.g. 404s/transient errors) trigger zero-cost, schema-accurate dynamic fallback generators.
+1. **Local Classifier (Regex/Rules)**: Asynchronously classifies prompts on CPU without touching external APIs, routing them to the optimal starting tier.
+2. **Easy Categories Cascade**: Factual knowledge, sentiment classification, NER, and summarization tasks query the cheap `gemma-4-26b-a4b-it` model first. If output validation fails or a network timeout occurs, it automatically escalates to the mid-tier `gemma-4-31b-it-nvfp4` model.
+3. **Direct Hard Category Routing**: High-complexity categories bypass the cheap tier completely and query dedicated high-capability models:
+   - `math_reasoning`, `logical_reasoning` $\rightarrow$ `minimax-m3` directly.
+   - `code_generation`, `code_debugging` $\rightarrow$ `kimi-k2p7-code` directly.
+4. **Resiliency Failbacks**: Tasks failing all validation checks or API calls (e.g. 404s/transient connectivity issues) fall back to zero-cost, schema-accurate dynamic fallback generators to guarantee valid output file generation under any runtime condition.
 
 ---
 
@@ -44,9 +45,9 @@ The agent expects the following environment variables:
 | :--- | :--- | :--- |
 | `FIREWORKS_API_KEY` | Fireworks API Key | `fw_...` |
 | `FIREWORKS_BASE_URL` | Base URL for the Fireworks endpoints | `https://api.fireworks.ai/inference/v1` |
-| `ALLOWED_MODELS` | Comma-separated list of allowed models | `minimax-m3,kimi-k2p7-code,gemma-4-26b-a4b-it,...` |
-| `MAX_LOCAL_CONCURRENCY` | Maximum concurrent local model slots (Optional) | `3` (Default) |
-| `MAX_REMOTE_CONCURRENCY`| Maximum concurrent remote I/O calls (Optional) | `12` (Default) |
+| `ALLOWED_MODELS` | Comma-separated list of allowed models | `minimax-m3,kimi-k2p7-code,gemma-4-26b-a4b-it,gemma-4-31b-it,gemma-4-31b-it-nvfp4` |
+| `DEV_MODE` | Optional toggle for GGUF local model execution (Default: `false` for production remote-only submissions) | `false` |
+| `MAX_REMOTE_CONCURRENCY`| Maximum concurrent remote I/O calls | `12` (Default) |
 
 ---
 
@@ -57,17 +58,12 @@ The agent expects the following environment variables:
 pip install -r requirements.txt
 ```
 
-### 2. Download local GGUF model
-```bash
-python download_model.py
-```
-
-### 3. Generate sample tasks
+### 2. Generate sample tasks
 ```bash
 python run_local_demo.py
 ```
 
-### 4. Run the Agent
+### 3. Run the Agent
 Ensure you have the required environment variables exported, then run:
 ```bash
 python main.py

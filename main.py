@@ -30,6 +30,9 @@ from client import FireworksClient, get_max_tokens, get_emergency_fallback
 MODEL_DIR = os.path.join(os.path.dirname(__file__), "models")
 MODEL_PATH = os.path.join(MODEL_DIR, "qwen2.5-1.5b-instruct-q4_k_m.gguf")
 
+# DEV_MODE toggle (defaulting to False for production submission)
+DEV_MODE = os.environ.get("DEV_MODE", "false").lower() == "true"
+
 # Global local model state
 local_server_process = None
 local_disabled = True
@@ -48,6 +51,11 @@ def get_local_prompt(category: str, prompt: str) -> str:
 def start_local_server() -> subprocess.Popen:
     global local_disabled
     
+    if not DEV_MODE:
+        logger.info("DEV_MODE is false. Operating in production all-remote mode. Local server will not be started.")
+        local_disabled = True
+        return None
+        
     # Path to winget-installed llama-server on Windows
     win_bin = r"C:\Users\cheer\AppData\Local\Microsoft\WinGet\Packages\ggml.llamacpp_Microsoft.Winget.Source_8wekyb3d8bbwe\llama-server.exe"
     binary = win_bin if os.path.exists(win_bin) else "llama-server"
@@ -343,11 +351,11 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
                     if validation_pass:
                         logger.info(f"Task {task_id}: Mid remote model passed validation.")
                     else:
-                        logger.warning(f"Task {task_id}: Mid remote model failed validation. Returning output anyway.")
+                        logger.warning(f"Task {task_id}: Mid remote model failed validation. Falling back to emergency generator.")
+                        answer = get_emergency_fallback(category, prompt)
                 except Exception as e:
                     logger.error(f"Task {task_id}: Mid remote model failed: {e}")
-                    if not answer:
-                        answer = get_emergency_fallback(category, prompt)
+                    answer = get_emergency_fallback(category, prompt)
                         
     # 4. Direct-to-remote categories
     if category not in easy_categories:
@@ -367,24 +375,11 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
                     if validation_pass:
                         logger.info(f"Task {task_id}: Reasoning model passed validation.")
                     else:
-                        logger.warning(f"Task {task_id}: Reasoning model failed validation. Cascading to cheap remote...")
+                        logger.warning(f"Task {task_id}: Reasoning model failed validation. Falling back to emergency generator.")
+                        answer = get_emergency_fallback(category, prompt)
                 except Exception as e:
                     logger.error(f"Task {task_id}: Reasoning model failed: {e}")
-                    
-                # Fallback to cheap remote
-                if not validation_pass:
-                    try:
-                        answer = await client.call_api(
-                            model=roles["cheap"],
-                            category=category,
-                            prompt=prompt,
-                            timeout=8.0
-                        )
-                        validation_pass = validate_category_output(category, prompt, answer)
-                    except Exception as e:
-                        logger.error(f"Task {task_id}: Reasoning model fallback failed: {e}")
-                        if not answer:
-                            answer = get_emergency_fallback(category, prompt)
+                    answer = get_emergency_fallback(category, prompt)
                             
             elif category in ["code_debugging", "code_generation"]:
                 tier_used = "direct-remote"
@@ -400,24 +395,11 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
                     if validation_pass:
                         logger.info(f"Task {task_id}: Code model passed validation.")
                     else:
-                        logger.warning(f"Task {task_id}: Code model failed validation. Cascading to reasoning model...")
+                        logger.warning(f"Task {task_id}: Code model failed validation. Falling back to emergency generator.")
+                        answer = get_emergency_fallback(category, prompt)
                 except Exception as e:
                     logger.error(f"Task {task_id}: Code model failed: {e}")
-                    
-                # Fallback to reasoning model
-                if not validation_pass:
-                    try:
-                        answer = await client.call_api(
-                            model=roles["reasoning"],
-                            category=category,
-                            prompt=prompt,
-                            timeout=8.0
-                        )
-                        validation_pass = validate_category_output(category, prompt, answer)
-                    except Exception as e:
-                        logger.error(f"Task {task_id}: Code model fallback failed: {e}")
-                        if not answer:
-                            answer = get_emergency_fallback(category, prompt)
+                    answer = get_emergency_fallback(category, prompt)
                             
     # Log information to stdout only
     latency = time.time() - start_time

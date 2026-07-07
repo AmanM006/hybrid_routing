@@ -1,0 +1,102 @@
+[
+  {
+    "task_id": "task_ner_1",
+    "prompt": "Extract entities: John Doe works at TechCorp in Tokyo. Index 1."
+  },
+  {
+    "task_id": "task_sentiment_2",
+    "prompt": "Classify sentiment (positive/negative/neutral): The food was excellent at restaurant 2."
+  },
+  {
+    "task_id": "task_summary_3",
+    "prompt": "Summarize in 5 words or less: Machine learning is study of computer algorithms that improve automatically. Index 3."
+  },
+  {
+    "task_id": "task_factual_4",
+    "prompt": "What is the capital of France? Query number 4."
+  },
+  {
+    "task_id": "task_ner_5",
+    "prompt": "Extract entities: John Doe works at TechCorp in Tokyo. Index 5."
+  },
+  {
+    "task_id": "task_sentiment_6",
+    "prompt": "Classify sentiment (positive/negative/neutral): The food was excellent at restaurant 6."
+  },
+  {
+    "task_id": "task_summary_7",
+    "prompt": "Summarize in 5 words or less: Machine learning is study of computer algorithms that improve automatically. Index 7."
+  },
+  {
+    "task_id": "task_factual_8",
+    "prompt": "What is the capital of France? Query number 8."
+  },
+  {
+    "task_id": "task_ner_9",
+    "prompt": "Extract entities: John Doe works at TechCorp in Tokyo. Index 9."
+  },
+  {
+    "task_id": "task_sentiment_10",
+    "prompt": "Classify sentiment (positive/negative/neutral): The food was excellent at restaurant 10."
+  },
+  {
+    "task_id": "task_summary_11",
+    "prompt": "Summarize in 5 words or less: Machine learning is study of computer algorithms that improve automatically. Index 11."
+  },
+  {
+    "task_id": "task_factual_12",
+    "prompt": "What is the capital of France? Query number 12."
+  },
+  {
+    "task_id": "task_ner_13",
+    "prompt": "Extract entities: John Doe works at TechCorp in Tokyo. Index 13."
+  },
+  {
+    "task_id": "task_sentiment_14",
+    "prompt": "Classify sentiment (positive/negative/neutral): The food was excellent at restaurant 14."
+  },
+  {
+    "task_id": "task_summary_15",
+    "prompt": "Summarize in 5 words or less: Machine learning is study of computer algorithms that improve automatically. Index 15."
+  },
+  {
+    "task_id": "task_factual_16",
+    "prompt": "What is the capital of France? Query number 16."
+  },
+  {
+    "task_id": "task_ner_17",
+    "prompt": "Extract entities: John Doe works at TechCorp in Tokyo. Index 17."
+  },
+  {
+    "task_id": "task_sentiment_18",
+    "prompt": "Classify sentiment (positive/negative/neutral): The food was excellent at restaurant 18."
+  },
+  {
+    "task_id": "task_summary_19",
+    "prompt": "Summarize in 5 words or less: Machine learning is study of computer algorithms that improve automatically. Index 19."
+  },
+  {
+    "task_id": "task_factual_20",
+    "prompt": "What is the capital of France? Query number 20."
+  },
+  {
+    "task_id": "task_ner_21",
+    "prompt": "Extract entities: John Doe works at TechCorp in Tokyo. Index 21."
+  },
+  {
+    "task_id": "task_sentiment_22",
+    "prompt": "Classify sentiment (positive/negative/neutral): The food was excellent at restaurant 22."
+  },
+  {
+    "task_id": "task_summary_23",
+    "prompt": "Summarize in 5 words or less: Machine learning is study of computer algorithms that improve automatically. Index 23."
+  },
+  {
+    "task_id": "task_factual_24",
+    "prompt": "What is the capital of France? Query number 24."
+  },
+  {
+    "task_id": "task_ner_25",
+    "prompt": "Extract entities: John Doe works at TechCorp in Tokyo. Index 25."
+  }
+]
