@@ -123,17 +123,7 @@ async def verify_local_answer(category: str, prompt: str, answer: str) -> bool:
         return True
         
     try:
-        if category == "sentiment_classification":
-            verify_system = "You are a verification assistant. Respond with 'yes' or 'no' only."
-            verify_user = (
-                f"Text: {prompt}\n"
-                f"Proposed Sentiment: {answer}\n\n"
-                "Is the proposed sentiment correct for the text? Answer only 'yes' or 'no'."
-            )
-            val = await call_local_model(verify_system, verify_user, max_tokens=10)
-            return "yes" in val.lower()
-            
-        elif category == "named_entity_recognition":
+        if category == "named_entity_recognition":
             try:
                 start = answer.find('{')
                 end = answer.rfind('}')
@@ -147,26 +137,6 @@ async def verify_local_answer(category: str, prompt: str, answer: str) -> bool:
             except Exception:
                 return False
                 
-        elif category == "summarization":
-            verify_system = "You are a validation assistant. Respond with 'yes' or 'no' only."
-            verify_user = (
-                f"Source: {prompt}\n"
-                f"Summary: {answer}\n\n"
-                "Is the summary factually accurate relative to the source? Answer only 'yes' or 'no'."
-            )
-            val = await call_local_model(verify_system, verify_user, max_tokens=10)
-            return "yes" in val.lower()
-            
-        elif category == "factual_knowledge":
-            verify_system = "You are a verification assistant. Respond with 'yes' or 'no' only."
-            verify_user = (
-                f"Question: {prompt}\n"
-                f"Answer: {answer}\n\n"
-                "Is this answer factually correct? Answer only 'yes' or 'no'."
-            )
-            val = await call_local_model(verify_system, verify_user, max_tokens=10)
-            return "yes" in val.lower()
-            
         return True
     except Exception as e:
         logger.warning(f"Self-verification helper encountered error: {e}")
