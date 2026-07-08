@@ -50,11 +50,6 @@ def get_local_prompt(category: str, prompt: str) -> str:
 
 def start_local_server() -> subprocess.Popen:
     global local_disabled
-    
-    if not DEV_MODE:
-        logger.info("DEV_MODE is false. Operating in production all-remote mode. Local server will not be started.")
-        local_disabled = True
-        return None
         
     # Path to winget-installed llama-server on Windows
     win_bin = r"C:\Users\cheer\AppData\Local\Microsoft\WinGet\Packages\ggml.llamacpp_Microsoft.Winget.Source_8wekyb3d8bbwe\llama-server.exe"

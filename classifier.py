@@ -55,6 +55,18 @@ async def classify_prompt(prompt: str, local_llm_callable=None) -> str:
     """
     prompt_lower = prompt.lower()
     
+    # High-priority logic puzzle check
+    if any(x in prompt_lower for x in ["who owns", "different pet", "does not own", "knights and knaves", "logic puzzle"]):
+        return "logical_reasoning"
+        
+    # High-priority math puzzle / calculation check
+    has_math_pattern = (
+        re.search(r"\b\d+\b.*?\b(percent|%|remain|remains|remaining|total|each|sells|items)\b", prompt_lower) or 
+        re.search(r"\b(remain|remains|remaining|total|each|sells|items)\b.*?\b\d+\b", prompt_lower)
+    )
+    if has_math_pattern:
+        return "math_reasoning"
+        
     # Check for code blocks
     has_code_block = "```" in prompt
     

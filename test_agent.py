@@ -236,7 +236,7 @@ class TestMainLoop(unittest.IsolatedAsyncioTestCase):
         
         # Write temporary input file
         os.makedirs("./input", exist_ok=True)
-        with open("./input/tasks.json", "w") as f:
+        with open("./input/test_tasks.json", "w") as f:
             json.dump(input_data, f)
             
         mock_client = AsyncMock()
@@ -272,8 +272,8 @@ class TestMainLoop(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(output_data[1]["task_id"], "t2")
         
         # Clean up files
-        if os.path.exists("./input/tasks.json"):
-            os.remove("./input/tasks.json")
+        if os.path.exists("./input/test_tasks.json"):
+            os.remove("./input/test_tasks.json")
         if os.path.exists(output_path):
             os.remove(output_path)
 
