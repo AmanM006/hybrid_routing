@@ -175,8 +175,12 @@ class FireworksClient:
     async def call_api(self, model: str, category: str, prompt: str, timeout: float = 12.0) -> str:
         """
         Sends a request to the Fireworks API with identical prefixes, zero temperature,
-        max_tokens caps, and a automatic retry on failure.
+        max_tokens caps, and an automatic retry on failure.
         """
+        # Ensure model is fully qualified with accounts/fireworks/models/ prefix
+        if "/" not in model:
+            model = f"accounts/fireworks/models/{model}"
+
         system_prompt = SYSTEM_PROMPTS.get(category, "Answer the user prompt.")
         max_tokens = get_max_tokens(category, prompt)
         
@@ -196,12 +200,25 @@ class FireworksClient:
                     max_tokens=max_tokens,
                     timeout=timeout
                 )
-                content = response.choices[0].message.content
+                msg = response.choices[0].message
+                content = msg.content
+                
+                # Retrieve reasoning content if standard content is empty (common for reasoning models like minimax-m3)
+                reasoning = getattr(msg, "reasoning_content", None)
+                if not reasoning and hasattr(msg, "model_extra") and msg.model_extra:
+                    reasoning = msg.model_extra.get("reasoning_content")
+                    
+                final_text = ""
                 if content:
+                    final_text = content.strip()
+                elif reasoning:
+                    final_text = reasoning.strip()
+                    
+                if final_text:
                     logger.info(f"API call to {model} succeeded on attempt {attempt+1}")
-                    return content.strip()
+                    return final_text
                 else:
-                    raise ValueError("Received empty content from remote model.")
+                    raise ValueError("Received empty content and reasoning from remote model.")
             except Exception as e:
                 logger.warning(f"API call attempt {attempt+1} failed with error: {e}")
                 if attempt == attempts - 1:
