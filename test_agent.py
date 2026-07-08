@@ -175,9 +175,9 @@ class TestGeneralPurposeAgent(unittest.IsolatedAsyncioTestCase):
         """
         prompt = "Classify this review (positive/negative/neutral): I loved it!"
         
-        self.assertTrue(validate_category_output("sentiment_classification", prompt, "positive"))
-        self.assertTrue(validate_category_output("sentiment_classification", prompt, "The sentiment is negative."))
-        self.assertFalse(validate_category_output("sentiment_classification", prompt, "excellent product")) # Missing positive/negative/neutral
+        self.assertTrue(validate_category_output("sentiment_classification", prompt, "positive - because the user loved it."))
+        self.assertTrue(validate_category_output("sentiment_classification", prompt, "The sentiment is negative because it was bad."))
+        self.assertFalse(validate_category_output("sentiment_classification", prompt, "positive")) # Too short/no justification
 
         # Justification requested
         prompt_with_just = "Determine the sentiment (positive/negative) and provide a justification."
@@ -240,7 +240,7 @@ class TestMainLoop(unittest.IsolatedAsyncioTestCase):
             json.dump(input_data, f)
             
         mock_client = AsyncMock()
-        mock_client.call_api.return_value = "Answer: positive"
+        mock_client.call_api.return_value = "positive - because it is happy."
         
         roles = {
             "code": "model-code",

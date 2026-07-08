@@ -84,14 +84,11 @@ def validate_sentiment(prompt: str, output: str) -> bool:
         logger.warning(f"Sentiment Validation Failed: No expected label {expected_labels} found in output.")
         return False
         
-    # 3. Check for justification if requested
-    justification_requested = any(w in prompt_lower for w in ["justification", "explain", "why", "reason", "because"])
-    if justification_requested:
-        # Output should be longer than just the label (e.g. at least 3 words)
-        words = output.split()
-        if len(words) < 3:
-            logger.warning("Sentiment Validation Failed: Justification was requested but not provided.")
-            return False
+    # 3. Always require a non-trivial justification (at least 4 words total including the label)
+    words = output.strip().split()
+    if len(words) < 4:
+        logger.warning("Sentiment Validation Failed: Justification not provided alongside the label.")
+        return False
             
     return True
 

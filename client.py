@@ -17,7 +17,7 @@ SYSTEM_PROMPTS = {
     ),
     "sentiment_classification": (
         "You are a Sentiment Analysis assistant. Classify the sentiment label of the input text (e.g. positive, negative, or neutral, or as specified). "
-        "Provide a brief, non-empty justification for the label if requested. "
+        "You MUST provide two things: first, the classification label, and second, a brief, one-sentence justification explaining your choice. "
         "Answer only with the label and justification. No preamble or explanation."
     ),
     "summarization": (
