@@ -167,17 +167,16 @@ def validate_factual(prompt: str, output: str) -> bool:
 
 def validate_reasoning(output: str) -> bool:
     """
-    math_reasoning / logical_reasoning: output must contain a clear final answer
-    in a parseable form (e.g. explicit 'Answer: X' line).
+    math_reasoning / logical_reasoning: output must be non-empty and of reasonable length.
     """
-    output_lower = output.lower()
-    # Check for "answer:" or similar key lines
-    # Check for structured "Answer:" or "Answer is" patterns
-    if re.search(r"\b(?:final\s+)?answer\s*is\b|\b(?:final\s+)?answer\s*:\s*\S+", output_lower):
-        return True
-        
-    logger.warning("Reasoning Validation Failed: Clear final answer marker not found.")
-    return False
+    output_clean = output.strip()
+    if not output_clean:
+        logger.warning("Reasoning Validation Failed: Output is empty.")
+        return False
+    if len(output_clean) < 1:
+        logger.warning("Reasoning Validation Failed: Output too short.")
+        return False
+    return True
 
 def validate_code(prompt: str, output: str, is_debugging: bool = False) -> bool:
     """

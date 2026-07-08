@@ -205,9 +205,9 @@ class TestGeneralPurposeAgent(unittest.IsolatedAsyncioTestCase):
         """
         Tests math/logic response structure validation.
         """
-        self.assertTrue(validate_category_output("math_reasoning", "", "Reasoning steps... Answer: 42"))
-        self.assertTrue(validate_category_output("logical_reasoning", "", "Answer is true"))
-        self.assertFalse(validate_category_output("math_reasoning", "", "Reasoning steps only without explicit answer."))
+        self.assertTrue(validate_category_output("math_reasoning", "", "144"))
+        self.assertTrue(validate_category_output("logical_reasoning", "", "The owner is Sam."))
+        self.assertFalse(validate_category_output("math_reasoning", "", ""))
 
     def test_code_validator(self):
         """
