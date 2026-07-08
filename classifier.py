@@ -56,7 +56,7 @@ async def classify_prompt(prompt: str, local_llm_callable=None) -> str:
     prompt_lower = prompt.lower()
     
     # High-priority logic puzzle check
-    if any(x in prompt_lower for x in ["who owns", "different pet", "does not own", "knights and knaves", "logic puzzle"]):
+    if any(x in prompt_lower for x in ["who owns", "different pet", "does not own", "knights and knaves", "logic puzzle"]) or "if all" in prompt_lower or ("is a" in prompt_lower and "always" in prompt_lower):
         return "logical_reasoning"
         
     # High-priority math puzzle / calculation check
@@ -74,6 +74,11 @@ async def classify_prompt(prompt: str, local_llm_callable=None) -> str:
     code_score = len(CODE_KEYWORDS.findall(prompt_lower))
     debug_score = len(DEBUG_KEYWORDS.findall(prompt_lower))
     math_score = len(MATH_KEYWORDS.findall(prompt_lower))
+    
+    # Exclude false-positive math match on commercial "product" in reviews if no digits exist
+    if "product" in prompt_lower and not re.search(r"\d", prompt):
+        math_score = max(0, math_score - len(re.findall(r"\bproduct\b", prompt_lower)))
+        
     logic_score = len(LOGIC_KEYWORDS.findall(prompt_lower))
     sentiment_score = len(SENTIMENT_KEYWORDS.findall(prompt_lower))
     summarize_score = len(SUMMARIZE_KEYWORDS.findall(prompt_lower))

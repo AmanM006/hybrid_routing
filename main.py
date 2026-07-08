@@ -265,7 +265,7 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
                 max_tokens = min(35 if category != "named_entity_recognition" else 70, get_max_tokens(category, prompt))
                 answer = await asyncio.wait_for(
                     call_local_model(system_prompt, user_prompt, max_tokens),
-                    timeout=24.0
+                    timeout=40.0
                 )
                 validation_pass = validate_category_output(category, prompt, answer)
                 if validation_pass:
