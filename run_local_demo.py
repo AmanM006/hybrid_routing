@@ -35,7 +35,7 @@ def main():
     print(f"Created sample task file with 25 tasks at: {os.path.abspath(tasks_path)}")
     print("\nNext steps to run a live test:")
     print("1. Download the local model:  python download_model.py")
-    print("2. Run the routing agent:     python main.py")
+    print("2. Run the agent:             python main.py")
     print("3. Inspect the outputs:       ./output/results.json")
 
 if __name__ == "__main__":

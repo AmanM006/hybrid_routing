@@ -15,7 +15,7 @@ from client import get_emergency_fallback
 from main import classify_model_roles
 import main
 
-class TestRoutingAgent(unittest.IsolatedAsyncioTestCase):
+class TestGeneralPurposeAgent(unittest.IsolatedAsyncioTestCase):
 
     def test_role_classification(self):
         """

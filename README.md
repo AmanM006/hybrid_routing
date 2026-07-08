@@ -1,18 +1,18 @@
-# Track 1 — Token-Efficient Remote Cascade Routing Agent
+# Track 1 — General-Purpose AI Agent for Multi-Category Tasks
 
-A cost-optimal, highly resilient AI routing agent implementing a multi-model remote inference cascade for Track 1 of the AMD Developer Hackathon.
+A highly resilient, general-purpose AI agent optimized to handle 8 NLP and coding task categories, utilizing cost-optimal Fireworks API model selection for token and cost efficiency.
 
 ## Architecture Overview
 
-The agent is designed to maximize remote token efficiency and accuracy using an asynchronous cascade pipeline executing entirely against the Fireworks API (using allowed models):
+The agent executes a unified inference pipeline against the Fireworks API, selecting the cheapest capable model category-by-category to minimize token counts and latency while maintaining high semantic accuracy:
 
 ```mermaid
 graph TD
-    A[Input Tasks] --> B[Local Task Classifier]
+    A[Input Tasks] --> B[Task Classifier]
     
-    B -->|Easy Task: sentiment, factual, summary, NER| C[Cheap Remote: gemma-4-26b-a4b-it]
-    B -->|Hard Task: math, logic| D[Reasoning Remote: minimax-m3]
-    B -->|Hard Task: code, debugging| E[Code Remote: kimi-k2p7-code]
+    B -->|Easy Category: sentiment, factual, summary, NER| C[Cheap Remote: gemma-4-26b-a4b-it]
+    B -->|Hard Category: math, logic| D[Reasoning Remote: minimax-m3]
+    B -->|Hard Category: code, debugging| E[Code Remote: kimi-k2p7-code]
     
     C -->|Passes Validator| F[Write Results]
     C -->|Fails Validator / Error| G[Mid Remote: gemma-4-31b-it-nvfp4]
@@ -28,12 +28,12 @@ graph TD
     E -->|Fails / Error| H
 ```
 
-1. **Local Classifier (Regex/Rules)**: Asynchronously classifies prompts on CPU without touching external APIs, routing them to the optimal starting tier.
-2. **Easy Categories Cascade**: Factual knowledge, sentiment classification, NER, and summarization tasks query the cheap `gemma-4-26b-a4b-it` model first. If output validation fails or a network timeout occurs, it automatically escalates to the mid-tier `gemma-4-31b-it-nvfp4` model.
-3. **Direct Hard Category Routing**: High-complexity categories bypass the cheap tier completely and query dedicated high-capability models:
+1. **Category Routing**: Classifies input prompts locally on CPU into one of 8 target categories to determine the optimal starting model tier.
+2. **Cheap-to-Strong Cascade (Easy Categories)**: Factual knowledge, sentiment classification, NER, and summarization tasks start at the cheap `gemma-4-26b-a4b-it` model. If output validation fails, it automatically escalates to the mid-tier `gemma-4-31b-it-nvfp4` model.
+3. **Direct Strong Model Query (Hard Categories)**: Mathematical reasoning, logical puzzles, code generation, and debugging bypass the cheap tier to query specialized reasoning and code models directly:
    - `math_reasoning`, `logical_reasoning` $\rightarrow$ `minimax-m3` directly.
    - `code_generation`, `code_debugging` $\rightarrow$ `kimi-k2p7-code` directly.
-4. **Resiliency Failbacks**: Tasks failing all validation checks or API calls (e.g. 404s/transient connectivity issues) fall back to zero-cost, schema-accurate dynamic fallback generators to guarantee valid output file generation under any runtime condition.
+4. **Resiliency Fallbacks**: Prompts failing validation checks or API calls (e.g. 404s/transient errors) fall back to zero-cost, schema-accurate dynamic fallback generators to guarantee valid output file generation under any runtime condition.
 
 ---
 
@@ -75,7 +75,7 @@ python main.py
 
 ### 1. Build the container
 ```bash
-docker build --platform linux/amd64 -t hybrid-routing-agent .
+docker build --platform linux/amd64 -t general-purpose-agent .
 ```
 
 ### 2. Run the container
@@ -86,8 +86,8 @@ docker run \
   -v $(pwd)/output:/output \
   -e FIREWORKS_API_KEY=your_key \
   -e FIREWORKS_BASE_URL=https://api.fireworks.ai/inference/v1 \
-  -e ALLOWED_MODELS=minimax-m3,kimi-k2p7-code,gemma-4-31b-it,gemma-4-26b-a4b-it,gemma-4-31b-it-nvfp4 \
-  hybrid-routing-agent
+  -e ALLOWED_MODELS=minimax-m3,kimi-k2p7-code,gemma-4-26b-a4b-it,gemma-4-31b-it,gemma-4-31b-it-nvfp4 \
+  general-purpose-agent
 ```
 
 ---
