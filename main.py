@@ -620,17 +620,22 @@ async def main():
                 model=model_name,
                 category="factual_knowledge",
                 prompt="hello",
-                timeout=4.0
+                timeout=2.0
             )
             logger.info(f"Healthcheck for '{model_name}': SUCCESS (200)")
             live_models.append(model_name)
         except Exception as e:
             err_str = str(e)
             if "404" in err_str or "NOT_FOUND" in err_str or "not found" in err_str.lower():
+                # 404 is deterministic — model doesn't exist. Mark dead immediately, no retry.
                 logger.warning(f"Healthcheck for '{model_name}': DEAD (404 — removing from cascade)")
                 dead_models.append(model_name)
+            elif "429" in err_str or "RATE_LIMIT" in err_str:
+                # Rate limit during healthcheck — model exists, just busy. Keep it.
+                logger.warning(f"Healthcheck for '{model_name}': SOFT_FAIL 429 (keeping in cascade)")
+                live_models.append(model_name)
             else:
-                # Non-404 failure (rate limit, timeout) — keep the model, may recover
+                # Other failure (timeout, 5xx) — keep the model, may recover
                 logger.warning(f"Healthcheck for '{model_name}': SOFT_FAIL (keeping in cascade) — {e}")
                 live_models.append(model_name)
     

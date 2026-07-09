@@ -286,11 +286,15 @@ class FireworksClient:
                     raise ValueError("Received empty content and reasoning from remote model.")
             except Exception as e:
                 logger.warning(f"API call attempt {attempt+1} failed with error: {e}")
+                err_str = str(e)
+                # 404 = model doesn't exist: no point retrying, raise immediately
+                if "404" in err_str or "NOT_FOUND" in err_str or "not found" in err_str.lower():
+                    raise e
                 if attempt == attempts - 1:
                     # Propagate to allow escalation
                     raise e
                 # 429 = rate limit: use longer backoff so tokens replenish
-                is_rate_limit = "429" in str(e) or "RATE_LIMIT" in str(e)
+                is_rate_limit = "429" in err_str or "RATE_LIMIT" in err_str
                 wait = (2.5 * (attempt + 1)) if is_rate_limit else (0.5 * (attempt + 1))
                 logger.info(f"Waiting {wait:.1f}s before retry (rate_limit={is_rate_limit})...")
                 await asyncio.sleep(wait)

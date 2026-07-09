@@ -12,14 +12,18 @@ def validate_ner(output: str) -> bool:
     Reject if JSON doesn't parse, entities key missing, or any entry missing text/type.
     """
     try:
+        # Strip markdown code block fences if present (e.g. ```json ... ```)
+        stripped = re.sub(r"^```(?:json)?\s*", "", output.strip(), flags=re.IGNORECASE)
+        stripped = re.sub(r"\s*```$", "", stripped.strip())
         # Try to find a JSON object block in case there's preamble
-        start = output.find('{')
-        end = output.rfind('}')
+        start = stripped.find('{')
+        end = stripped.rfind('}')
         if start == -1 or end == -1 or end < start:
             logger.warning("NER Validation Failed: No curly braces found.")
             return False
+
         
-        json_str = output[start:end+1]
+        json_str = stripped[start:end+1]
         data = json.loads(json_str)
         
         if not isinstance(data, dict):
