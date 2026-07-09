@@ -301,10 +301,11 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
                     max_tokens = 70
                 else:
                     max_tokens = min(35, get_max_tokens(category, prompt))
-                answer = await asyncio.wait_for(
+                raw_answer = await asyncio.wait_for(
                     call_local_model(system_prompt, user_prompt, max_tokens),
                     timeout=40.0
                 )
+                answer = client._scrub_cot(raw_answer, category)
                 validation_pass = validate_category_output(category, prompt, answer)
                 if validation_pass:
                     verification_pass = await verify_local_answer(category, prompt, answer)
@@ -693,7 +694,8 @@ async def main():
     
     # 5. Run tasks concurrently
     max_local_concurrency = int(os.environ.get("MAX_LOCAL_CONCURRENCY", "3"))
-    max_remote_concurrency = int(os.environ.get("MAX_REMOTE_CONCURRENCY", "12"))
+    max_remote_concurrency = int(os.environ.get("MAX_REMOTE_CONCURRENCY", "4"))
+
     
     logger.info(f"Using split concurrency limits: local CPU: {max_local_concurrency}, remote I/O: {max_remote_concurrency}")
     

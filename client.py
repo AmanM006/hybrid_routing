@@ -271,7 +271,8 @@ class FireworksClient:
             {"role": "user", "content": prompt + "\n\nAnswer only. No explanation, no chain-of-thought, no preamble, no restating the question."}
         ]
         
-        attempts = 3
+        attempts = 5
+        import random
         for attempt in range(attempts):
             try:
                 logger.info(f"API call to model {model} (Category: {category}), attempt {attempt+1}")
@@ -328,9 +329,9 @@ class FireworksClient:
                 if attempt == attempts - 1:
                     # Propagate to allow escalation
                     raise e
-                # 429 = rate limit: use longer backoff so tokens replenish
+                # 429 = rate limit: use longer backoff so tokens replenish, plus random jitter
                 is_rate_limit = "429" in err_str or "RATE_LIMIT" in err_str
-                wait = (2.5 * (attempt + 1)) if is_rate_limit else (0.5 * (attempt + 1))
+                wait = (3.0 * (attempt + 1) + random.uniform(0.5, 1.5)) if is_rate_limit else (0.5 * (attempt + 1))
                 logger.info(f"Waiting {wait:.1f}s before retry (rate_limit={is_rate_limit})...")
                 await asyncio.sleep(wait)
                 
