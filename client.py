@@ -191,33 +191,63 @@ class FireworksClient:
         """
         if not text:
             return text
-        
-        # Don't scrub code responses — they're expected to be verbose
+
+        # For code responses: extract the FIRST valid code block and drop surrounding CoT
         if category in ["code_generation", "code_debugging"]:
+            code_block_match = re.search(r"```(?:python)?\s*\n(.+?)```", text, re.DOTALL)
+            if code_block_match:
+                return "```python\n" + code_block_match.group(1).rstrip() + "\n```"
             return text
-        
+
         lines = text.strip().splitlines()
         skip_prefixes = (
             "the user wants", "the user asks", "the user said", "the user's question",
+            "the user also", "the user is asking",
             "let me", "i need to", "i will", "i should", "i must", "i'll",
             "thinking:", "thought:", "analysis:", "reasoning:", "chain of thought",
             "step 1", "step 2", "step 3", "first,", "second,", "third,",
+            "answer only.", "no explanation,", "no chain-of-thought",
         )
         cleaned_lines = []
         for line in lines:
             stripped = line.strip().lower()
             if stripped.startswith(skip_prefixes):
                 continue
+            # Drop lines that are SOLELY echoing instructions (keyword must appear within first 40 chars)
+            instr_match = re.search(r'answer only|no preamble|no chain.of.thought|no restating', stripped)
+            if instr_match and instr_match.start() < 40:
+                continue
+
             cleaned_lines.append(line)
-        
+
         result = "\n".join(cleaned_lines).strip()
-        
+
+        # For math/logic: strip leading 'Answer: ' prefix so judge gets the raw value
+        if category in ["math_reasoning", "logical_reasoning"]:
+            result = re.sub(r'^[Aa]nswer:\s*', '', result).strip()
+
         # For sentiment: trim to max 2 sentences to avoid trailing cut-off garbage
         if category == "sentiment_classification" and result:
             sentences = re.split(r'(?<=[.!?])\s+', result)
             result = " ".join(sentences[:2]).strip()
-        
+
+        # Trim trailing instruction-bleed using simple string find (more reliable than regex on mixed line endings)
+        _BLEED_MARKERS = [
+            "the user also says", "the user also said",
+            "answer only.", "answer only,",
+            "no explanation,", "no explanation.",
+            "no chain-of-thought", "no preamble",
+        ]
+        result_lower = result.lower()
+        for marker in _BLEED_MARKERS:
+            idx = result_lower.find(marker)
+            if idx > 20:  # Only trim if there's real content before the leak
+                result = result[:idx].strip().rstrip('."\',(').strip()
+                result_lower = result.lower()  # Update for next marker check
+                break
+
         return result if result else text
+
 
     async def call_api(self, model: str, category: str, prompt: str, timeout: float = 12.0) -> str:
         """
