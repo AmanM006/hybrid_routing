@@ -295,31 +295,40 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
     # Math: solve purely with code; NER: extract with regex.
     # Both return None on any ambiguity so the cascade handles it.
     if category == "math_reasoning":
-        det_answer = solve_math_deterministically(prompt)
-        if det_answer is not None:
-            logger.info(f"Task {task_id}: Solved deterministically (math). Answer={det_answer!r}")
-            latency = time.time() - start_time
-            print(f"TASK_LOG: task_id={task_id} | category={category} | tier=deterministic | "
-                  f"model=none | approx_tokens=0 | validation=PASS | latency={latency:.2f}s", flush=True)
-            return {"task_id": task_id, "answer": det_answer}
+        try:
+            det_answer = solve_math_deterministically(prompt)
+            if det_answer is not None:
+                logger.info(f"Task {task_id}: Solved deterministically (math). Answer={det_answer!r}")
+                latency = time.time() - start_time
+                print(f"TASK_LOG: task_id={task_id} | category={category} | tier=deterministic | "
+                      f"model=none | approx_tokens=0 | validation=PASS | latency={latency:.2f}s", flush=True)
+                return {"task_id": task_id, "answer": det_answer}
+        except Exception as e:
+            logger.error(f"Task {task_id}: Math deterministic solver raised an exception: {e}", exc_info=True)
 
     if category == "named_entity_recognition":
-        det_answer = solve_ner_deterministically(prompt)
-        if det_answer is not None and validate_ner(det_answer):
-            logger.info(f"Task {task_id}: Solved deterministically (NER). Answer={det_answer!r}")
-            latency = time.time() - start_time
-            print(f"TASK_LOG: task_id={task_id} | category={category} | tier=deterministic | "
-                  f"model=none | approx_tokens=0 | validation=PASS | latency={latency:.2f}s", flush=True)
-            return {"task_id": task_id, "answer": det_answer}
+        try:
+            det_answer = solve_ner_deterministically(prompt)
+            if det_answer is not None and validate_ner(det_answer):
+                logger.info(f"Task {task_id}: Solved deterministically (NER). Answer={det_answer!r}")
+                latency = time.time() - start_time
+                print(f"TASK_LOG: task_id={task_id} | category={category} | tier=deterministic | "
+                      f"model=none | approx_tokens=0 | validation=PASS | latency={latency:.2f}s", flush=True)
+                return {"task_id": task_id, "answer": det_answer}
+        except Exception as e:
+            logger.error(f"Task {task_id}: NER deterministic solver raised an exception: {e}", exc_info=True)
 
     if category == "logical_reasoning":
-        det_answer = solve_logic_deterministically(prompt)
-        if det_answer is not None:
-            logger.info(f"Task {task_id}: Solved deterministically (logic constraint). Answer={det_answer!r}")
-            latency = time.time() - start_time
-            print(f"TASK_LOG: task_id={task_id} | category={category} | tier=deterministic | "
-                  f"model=none | approx_tokens=0 | validation=PASS | latency={latency:.2f}s", flush=True)
-            return {"task_id": task_id, "answer": det_answer}
+        try:
+            det_answer = solve_logic_deterministically(prompt)
+            if det_answer is not None:
+                logger.info(f"Task {task_id}: Solved deterministically (logic constraint). Answer={det_answer!r}")
+                latency = time.time() - start_time
+                print(f"TASK_LOG: task_id={task_id} | category={category} | tier=deterministic | "
+                      f"model=none | approx_tokens=0 | validation=PASS | latency={latency:.2f}s", flush=True)
+                return {"task_id": task_id, "answer": det_answer}
+        except Exception as e:
+            logger.error(f"Task {task_id}: Logic deterministic solver raised an exception: {e}", exc_info=True)
     
     # 2. Local Tier (Easy categories)
     if category in easy_categories and not local_disabled:

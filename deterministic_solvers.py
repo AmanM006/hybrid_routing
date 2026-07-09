@@ -28,7 +28,7 @@ def _fmt(value: float) -> str:
     return result
 
 
-def solve_math_deterministically(prompt: str):
+def _solve_math_deterministically(prompt: str):
     """
     Try to solve a math problem purely with code.
     Returns a string answer if confident, otherwise None to fall through.
@@ -367,7 +367,7 @@ def _extract_locations(text: str):
     return list(dict.fromkeys(locations))
 
 
-def solve_ner_deterministically(prompt: str):
+def _solve_ner_deterministically(prompt: str):
     """
     Attempt to extract named entities using pure regex rules.
 
@@ -566,7 +566,7 @@ def _apply_constraints(assignment, pos_constraints, neg_constraints):
     return True
 
 
-def solve_logic_deterministically(prompt: str):
+def _solve_logic_deterministically(prompt: str):
     """
     Attempt to solve a finite-domain assignment constraint puzzle.
 
@@ -631,4 +631,31 @@ def solve_logic_deterministically(prompt: str):
             return solution[queried_ent].capitalize()
 
     return None  # can't determine what is being asked
+
+
+def solve_math_deterministically(prompt: str):
+    """Public wrapper — never raises; returns None on any error."""
+    try:
+        return _solve_math_deterministically(prompt)
+    except Exception:
+        logger.exception("[DETERM-MATH] Unexpected error — falling through")
+        return None
+
+
+def solve_ner_deterministically(prompt: str):
+    """Public wrapper — never raises; returns None on any error."""
+    try:
+        return _solve_ner_deterministically(prompt)
+    except Exception:
+        logger.exception("[DETERM-NER] Unexpected error — falling through")
+        return None
+
+
+def solve_logic_deterministically(prompt: str):
+    """Public wrapper — never raises; returns None on any error."""
+    try:
+        return _solve_logic_deterministically(prompt)
+    except Exception:
+        logger.exception("[DETERM-LOGIC] Unexpected error — falling through")
+        return None
 

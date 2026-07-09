@@ -42,7 +42,7 @@ COPY --from=builder /build/models /app/models
 COPY --from=builder /build/llama-server /usr/local/bin/llama-server
 
 # Copy source python modules
-COPY main.py classifier.py validators.py client.py ./
+COPY main.py classifier.py validators.py client.py deterministic_solvers.py ./
 
 # Set paths and python environment variables
 ENV PATH="/opt/venv/bin:$PATH"
