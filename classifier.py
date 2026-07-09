@@ -24,7 +24,7 @@ DEBUG_KEYWORDS = re.compile(
     re.IGNORECASE
 )
 MATH_KEYWORDS = re.compile(
-    r"\b(solve|equation|calculate|math|integral|derivative|algebra|geometry|trigonometry|matrix|probability|statistics|sum|product|fraction|percentage|ratio|arithmetic|plus|minus|multiplied|divided|equals)\b", 
+    r"\b(solve|equation|calculate|math|integral|derivative|algebra|geometry|trigonometry|matrix|probability|statistics|sum|product|fraction|percentage|ratio|arithmetic|plus|minus|multiplied|divided|equals|factorial|combination|permutation|exponent|square root|cube root|power of)\b", 
     re.IGNORECASE
 )
 LOGIC_KEYWORDS = re.compile(
@@ -73,8 +73,24 @@ async def classify_prompt(prompt: str, local_llm_callable=None) -> str:
     if re.search(r"minimum.*(?:guarantee|certain|sure)|guarantee.*minimum|must draw|to guarantee|minimum number", prompt_lower):
         return "logical_reasoning"
         
-    # Conditional/propositional logic: "if X then Y", "does it necessarily follow", "did it necessarily"
-    if re.search(r"\bif\b.{1,60}\bthen\b|\bnecessarily\b|\bif and only if\b|\ball .{1,40} are\b", prompt_lower):
+    # Conditional/propositional logic: "if X then Y", "did it necessarily"
+    # Also catches syllogism patterns: "Every X is Y. A Z is an X."
+    # Also catches "lights are on/off" type consequent checking.
+    # BUT exclude "neither/nor" sentiment phrasing — check sentiment cues first.
+    has_sentiment_cue = bool(re.search(r"\b(sentiment|positive|negative|neutral|liked|disliked|enjoyed|hated|feeling|tone|review|opinion)\b", prompt_lower))
+    # Don't apply conditional-logic check to code prompts (they contain 'if' inside function bodies)
+    has_code_signal = ("def " in prompt or "```" in prompt or
+                       bool(re.search(r"\b(function|return|python|implement|write a)\b", prompt_lower)))
+    if not has_sentiment_cue and not has_code_signal:
+        # Remove \b after period/comma — period is non-word char so \b never matches after it
+        if re.search(r"\bif\b.{1,80}(?:\.|,|\bthen\b)|\bnecessarily\b|\bif and only if\b", prompt_lower):
+            return "logical_reasoning"
+
+    # Syllogism: "Every X is Y" or "All X are Y" followed by deductive question
+    if re.search(r"\b(every|all)\b.{1,40}\b(is|are)\b", prompt_lower) and re.search(r"\b(is it|does it|will it|can it|answer yes|answer no)\b", prompt_lower):
+        return "logical_reasoning"
+    # "all ... are" (original pattern retained)
+    if re.search(r"\ball .{1,40} are\b", prompt_lower):
         return "logical_reasoning"
     
     # High-priority math puzzle / calculation check
@@ -122,13 +138,18 @@ async def classify_prompt(prompt: str, local_llm_callable=None) -> str:
             return "code_generation"
             
     # 3. Math Reasoning: clear math keywords or mathematical expressions
-    # e.g., contains algebraic patterns like x + y = z or digit relations
     math_symbol_match = re.search(r"[\d\+\-\*\/=\^]+", prompt)
-    if math_score >= 2 or (math_score >= 1 and math_symbol_match and len(math_symbol_match.group(0)) > 2):
+    if (math_score >= 2 or
+        (math_score >= 1 and math_symbol_match and len(math_symbol_match.group(0)) > 2) or
+        (math_score >= 1 and re.search(r"\d", prompt))):
         return "math_reasoning"
         
     # 4. Logical Reasoning: logic constraints or puzzle context
-    if logic_score >= 2 or (logic_score >= 1 and ("statement" in prompt_lower or "truth" in prompt_lower)):
+    # Don't let 'statement' alone beat sentiment cues
+    has_sentiment_cue2 = bool(re.search(r"\b(sentiment|positive|negative|neutral|liked|disliked|enjoyed|hated|feeling|tone|review|opinion|classify)\b", prompt_lower))
+    if has_sentiment_cue2:
+        logic_score = max(0, logic_score - len(re.findall(r"\bstatement\b", prompt_lower)))
+    if logic_score >= 2 or (logic_score >= 1 and ("truth" in prompt_lower or "puzzle" in prompt_lower or "deduce" in prompt_lower)):
         return "logical_reasoning"
         
     # Let's check easy categories
