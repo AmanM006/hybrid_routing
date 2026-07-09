@@ -286,23 +286,24 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
     if category in easy_categories and not validation_pass:
         async with remote_sem:
             # Step 3a: Cheap remote role
-            tier_used = "cheap-remote"
-            model_name = roles["cheap"]
-            try:
-                answer = await client.call_api(
-                    model=roles["cheap"],
-                    category=category,
-                    prompt=prompt,
-                    timeout=9.0
-                )
-                validation_pass = validate_category_output(category, prompt, answer)
-                if validation_pass:
-                    logger.info(f"Task {task_id}: Cheap remote model passed validation.")
-            except Exception as e:
-                logger.warning(f"Task {task_id}: Cheap remote model failed: {e}. Escalating...")
+            if roles.get("cheap"):
+                tier_used = "cheap-remote"
+                model_name = roles["cheap"]
+                try:
+                    answer = await client.call_api(
+                        model=roles["cheap"],
+                        category=category,
+                        prompt=prompt,
+                        timeout=9.0
+                    )
+                    validation_pass = validate_category_output(category, prompt, answer)
+                    if validation_pass:
+                        logger.info(f"Task {task_id}: Cheap remote model passed validation.")
+                except Exception as e:
+                    logger.warning(f"Task {task_id}: Cheap remote model failed: {e}. Escalating...")
                 
             # Step 3b: Mid remote role (escalate once)
-            if not validation_pass:
+            if not validation_pass and roles.get("mid"):
                 tier_used = "mid-remote"
                 model_name = roles["mid"]
                 try:
@@ -315,55 +316,206 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
                     validation_pass = validate_category_output(category, prompt, answer)
                     if validation_pass:
                         logger.info(f"Task {task_id}: Mid remote model passed validation.")
-                    else:
-                        logger.warning(f"Task {task_id}: Mid remote model failed validation. Falling back to emergency generator.")
-                        answer = get_emergency_fallback(category, prompt)
                 except Exception as e:
-                    logger.error(f"Task {task_id}: Mid remote model failed: {e}")
-                    answer = get_emergency_fallback(category, prompt)
+                    logger.warning(f"Task {task_id}: Mid remote model failed: {e}. Escalating...")
+                    
+            # Fallback 1: Reasoning remote role
+            if not validation_pass and roles.get("reasoning"):
+                tier_used = "reasoning-fallback"
+                model_name = roles["reasoning"]
+                try:
+                    logger.info(f"Task {task_id}: Easy category falling back to reasoning model: {model_name}")
+                    answer = await client.call_api(
+                        model=roles["reasoning"],
+                        category=category,
+                        prompt=prompt,
+                        timeout=12.0
+                    )
+                    validation_pass = validate_category_output(category, prompt, answer)
+                    if validation_pass:
+                        logger.info(f"Task {task_id}: Easy category reasoning fallback passed validation.")
+                except Exception as e:
+                    logger.warning(f"Task {task_id}: Easy category reasoning fallback failed: {e}. Escalating...")
+
+            # Fallback 2: Code remote role
+            if not validation_pass and roles.get("code"):
+                tier_used = "code-fallback"
+                model_name = roles["code"]
+                try:
+                    logger.info(f"Task {task_id}: Easy category falling back to code model: {model_name}")
+                    answer = await client.call_api(
+                        model=roles["code"],
+                        category=category,
+                        prompt=prompt,
+                        timeout=12.0
+                    )
+                    validation_pass = validate_category_output(category, prompt, answer)
+                    if validation_pass:
+                        logger.info(f"Task {task_id}: Easy category code fallback passed validation.")
+                except Exception as e:
+                    logger.warning(f"Task {task_id}: Easy category code fallback failed: {e}")
+
+            # Final Emergency Fallback
+            if not validation_pass:
+                logger.warning(f"Task {task_id}: All remote models failed for Easy Category. Falling back to emergency placeholder.")
+                answer = get_emergency_fallback(category, prompt)
                         
     # 4. Direct-to-remote categories
     if category not in easy_categories:
         async with remote_sem:
             validation_pass = False
             if category in ["math_reasoning", "logical_reasoning"]:
-                tier_used = "direct-remote"
-                model_name = roles["reasoning"]
-                try:
-                    answer = await client.call_api(
-                        model=roles["reasoning"],
-                        category=category,
-                        prompt=prompt,
-                        timeout=14.0
-                    )
-                    validation_pass = validate_category_output(category, prompt, answer)
-                    if validation_pass:
-                        logger.info(f"Task {task_id}: Reasoning model passed validation.")
-                    else:
-                        logger.warning(f"Task {task_id}: Reasoning model failed validation. Falling back to emergency generator.")
-                        answer = get_emergency_fallback(category, prompt)
-                except Exception as e:
-                    logger.error(f"Task {task_id}: Reasoning model failed: {e}")
+                # Try reasoning model first
+                if roles.get("reasoning"):
+                    tier_used = "direct-remote"
+                    model_name = roles["reasoning"]
+                    try:
+                        answer = await client.call_api(
+                            model=roles["reasoning"],
+                            category=category,
+                            prompt=prompt,
+                            timeout=14.0
+                        )
+                        validation_pass = validate_category_output(category, prompt, answer)
+                        if validation_pass:
+                            logger.info(f"Task {task_id}: Reasoning model passed validation.")
+                    except Exception as e:
+                        logger.warning(f"Task {task_id}: Reasoning model failed: {e}. Escalating...")
+                
+                # Fallback 1: mid model
+                if not validation_pass and roles.get("mid"):
+                    tier_used = "mid-fallback"
+                    model_name = roles["mid"]
+                    try:
+                        logger.info(f"Task {task_id}: Math/Logic falling back to mid model: {model_name}")
+                        answer = await client.call_api(
+                            model=roles["mid"],
+                            category=category,
+                            prompt=prompt,
+                            timeout=12.0
+                        )
+                        validation_pass = validate_category_output(category, prompt, answer)
+                        if validation_pass:
+                            logger.info(f"Task {task_id}: Math/Logic mid fallback model passed validation.")
+                    except Exception as e:
+                        logger.warning(f"Task {task_id}: Math/Logic mid fallback failed: {e}. Escalating...")
+
+                # Fallback 2: cheap model
+                if not validation_pass and roles.get("cheap"):
+                    tier_used = "cheap-fallback"
+                    model_name = roles["cheap"]
+                    try:
+                        logger.info(f"Task {task_id}: Math/Logic falling back to cheap model: {model_name}")
+                        answer = await client.call_api(
+                            model=roles["cheap"],
+                            category=category,
+                            prompt=prompt,
+                            timeout=10.0
+                        )
+                        validation_pass = validate_category_output(category, prompt, answer)
+                        if validation_pass:
+                            logger.info(f"Task {task_id}: Math/Logic cheap fallback model passed validation.")
+                    except Exception as e:
+                        logger.warning(f"Task {task_id}: Math/Logic cheap fallback failed: {e}. Escalating...")
+
+                # Fallback 3: code model
+                if not validation_pass and roles.get("code"):
+                    tier_used = "code-fallback"
+                    model_name = roles["code"]
+                    try:
+                        logger.info(f"Task {task_id}: Math/Logic falling back to code model: {model_name}")
+                        answer = await client.call_api(
+                            model=roles["code"],
+                            category=category,
+                            prompt=prompt,
+                            timeout=12.0
+                        )
+                        validation_pass = validate_category_output(category, prompt, answer)
+                        if validation_pass:
+                            logger.info(f"Task {task_id}: Math/Logic code fallback model passed validation.")
+                    except Exception as e:
+                        logger.warning(f"Task {task_id}: Math/Logic code fallback failed: {e}")
+
+                # Final Emergency Fallback
+                if not validation_pass:
+                    logger.warning(f"Task {task_id}: All models failed for Math/Logic. Falling back to emergency placeholder.")
                     answer = get_emergency_fallback(category, prompt)
                             
             elif category in ["code_debugging", "code_generation"]:
-                tier_used = "direct-remote"
-                model_name = roles["code"]
-                try:
-                    answer = await client.call_api(
-                        model=roles["code"],
-                        category=category,
-                        prompt=prompt,
-                        timeout=14.0
-                    )
-                    validation_pass = validate_category_output(category, prompt, answer)
-                    if validation_pass:
-                        logger.info(f"Task {task_id}: Code model passed validation.")
-                    else:
-                        logger.warning(f"Task {task_id}: Code model failed validation. Falling back to emergency generator.")
-                        answer = get_emergency_fallback(category, prompt)
-                except Exception as e:
-                    logger.error(f"Task {task_id}: Code model failed: {e}")
+                # Try code model first
+                if roles.get("code"):
+                    tier_used = "direct-remote"
+                    model_name = roles["code"]
+                    try:
+                        answer = await client.call_api(
+                            model=roles["code"],
+                            category=category,
+                            prompt=prompt,
+                            timeout=14.0
+                        )
+                        validation_pass = validate_category_output(category, prompt, answer)
+                        if validation_pass:
+                            logger.info(f"Task {task_id}: Code model passed validation.")
+                    except Exception as e:
+                        logger.warning(f"Task {task_id}: Code model failed: {e}. Escalating...")
+
+                # Fallback 1: mid model
+                if not validation_pass and roles.get("mid"):
+                    tier_used = "mid-fallback"
+                    model_name = roles["mid"]
+                    try:
+                        logger.info(f"Task {task_id}: Code falling back to mid model: {model_name}")
+                        answer = await client.call_api(
+                            model=roles["mid"],
+                            category=category,
+                            prompt=prompt,
+                            timeout=12.0
+                        )
+                        validation_pass = validate_category_output(category, prompt, answer)
+                        if validation_pass:
+                            logger.info(f"Task {task_id}: Code mid fallback model passed validation.")
+                    except Exception as e:
+                        logger.warning(f"Task {task_id}: Code mid fallback failed: {e}. Escalating...")
+
+                # Fallback 2: cheap model
+                if not validation_pass and roles.get("cheap"):
+                    tier_used = "cheap-fallback"
+                    model_name = roles["cheap"]
+                    try:
+                        logger.info(f"Task {task_id}: Code falling back to cheap model: {model_name}")
+                        answer = await client.call_api(
+                            model=roles["cheap"],
+                            category=category,
+                            prompt=prompt,
+                            timeout=10.0
+                        )
+                        validation_pass = validate_category_output(category, prompt, answer)
+                        if validation_pass:
+                            logger.info(f"Task {task_id}: Code cheap fallback model passed validation.")
+                    except Exception as e:
+                        logger.warning(f"Task {task_id}: Code cheap fallback failed: {e}. Escalating...")
+
+                # Fallback 3: reasoning model
+                if not validation_pass and roles.get("reasoning"):
+                    tier_used = "reasoning-fallback"
+                    model_name = roles["reasoning"]
+                    try:
+                        logger.info(f"Task {task_id}: Code falling back to reasoning model: {model_name}")
+                        answer = await client.call_api(
+                            model=roles["reasoning"],
+                            category=category,
+                            prompt=prompt,
+                            timeout=12.0
+                        )
+                        validation_pass = validate_category_output(category, prompt, answer)
+                        if validation_pass:
+                            logger.info(f"Task {task_id}: Code reasoning fallback model passed validation.")
+                    except Exception as e:
+                        logger.warning(f"Task {task_id}: Code reasoning fallback failed: {e}")
+
+                # Final Emergency Fallback
+                if not validation_pass:
+                    logger.warning(f"Task {task_id}: All models failed for Code. Falling back to emergency placeholder.")
                     answer = get_emergency_fallback(category, prompt)
                             
     # Log information to stdout only

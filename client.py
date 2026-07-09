@@ -193,13 +193,29 @@ class FireworksClient:
         for attempt in range(attempts):
             try:
                 logger.info(f"API call to model {model} (Category: {category}), attempt {attempt+1}")
-                response = await self.client.chat.completions.create(
-                    model=model,
-                    messages=messages,
-                    temperature=0.0,
-                    max_tokens=max_tokens,
-                    timeout=timeout
-                )
+                kwargs = {
+                    "model": model,
+                    "messages": messages,
+                    "temperature": 0.0,
+                    "max_tokens": max_tokens,
+                    "timeout": timeout
+                }
+                
+                # Check if this is a minimax reasoning model and configure reasoning_effort
+                if "minimax-m3" in model:
+                    kwargs["extra_body"] = {"reasoning_effort": "none"}
+                    
+                try:
+                    response = await self.client.chat.completions.create(**kwargs)
+                except Exception as e:
+                    # If reasoning_effort is not supported by the endpoint/SDK version, fall back
+                    if "extra_body" in kwargs and any(err in str(e).lower() for err in ["reasoning_effort", "invalid", "unexpected", "400"]):
+                        logger.warning(f"API call with reasoning_effort failed: {e}. Retrying without reasoning_effort parameter...")
+                        del kwargs["extra_body"]
+                        response = await self.client.chat.completions.create(**kwargs)
+                    else:
+                        raise e
+                        
                 msg = response.choices[0].message
                 content = msg.content
                 
