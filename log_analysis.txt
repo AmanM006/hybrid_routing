@@ -1,0 +1,60 @@
+﻿=== CONFIGURATION TABLE ===
+Role 'code': kimi-k2p7-code
+Role 'reasoning': minimax-m3
+Role 'cheap': gemma-4-26b-a4b-it
+Role 'mid': gemma-4-31b-it-nvfp4
+2026-07-09 16:43:11,578 [INFO] agent: Starting Fireworks connectivity healthcheck for all allowed models...
+2026-07-09 16:43:11,579 [INFO] agent: Healthcheck: sending test ping to minimax-m3...
+2026-07-09 16:43:13,290 [INFO] agent: Healthcheck for 'minimax-m3': SUCCESS (200)
+2026-07-09 16:43:13,291 [INFO] agent: Healthcheck: sending test ping to kimi-k2p7-code...
+2026-07-09 16:43:14,316 [INFO] agent: Healthcheck for 'kimi-k2p7-code': SUCCESS (200)
+2026-07-09 16:43:14,316 [INFO] agent: Healthcheck: sending test ping to gemma-4-31b-it...
+2026-07-09 16:43:14,956 [WARNING] agent: Healthcheck for 'gemma-4-31b-it': DEAD (404 � removing from cascade)
+2026-07-09 16:43:14,956 [INFO] agent: Healthcheck: sending test ping to gemma-4-26b-a4b-it...
+2026-07-09 16:43:15,626 [WARNING] agent: Healthcheck for 'gemma-4-26b-a4b-it': DEAD (404 � removing from cascade)
+2026-07-09 16:43:15,626 [INFO] agent: Healthcheck: sending test ping to gemma-4-31b-it-nvfp4...
+2026-07-09 16:43:16,466 [WARNING] agent: Healthcheck for 'gemma-4-31b-it-nvfp4': DEAD (404 � removing from cascade)
+2026-07-09 16:43:16,466 [WARNING] agent: Pruned 3 dead models from cascade: ['gemma-4-31b-it', 'gemma-4-26b-a4b-it', 'gemma-4-31b-it-nvfp4']
+=== UPDATED ROLE TABLE (live models only) ===
+Role 'code': kimi-k2p7-code
+Role 'reasoning': minimax-m3
+Role 'cheap': minimax-m3
+Role 'mid': minimax-m3
+TASK_LOG: task_id=m-03 | category=math_reasoning | tier=direct-remote | model=minimax-m3 | approx_tokens=3 | validation=PASS | latency=0.59s
+TASK_LOG: task_id=m-02 | category=math_reasoning | tier=direct-remote | model=minimax-m3 | approx_tokens=0 | validation=PASS | latency=0.90s
+TASK_LOG: task_id=d-01 | category=code_debugging | tier=direct-remote | model=kimi-k2p7-code | approx_tokens=13 | validation=PASS | latency=2.80s
+TASK_LOG: task_id=f-02 | category=factual_knowledge | tier=local | model=local | approx_tokens=0 | validation=PASS | latency=3.28s
+TASK_LOG: task_id=f-03 | category=factual_knowledge | tier=local | model=local | approx_tokens=1 | validation=PASS | latency=3.29s
+TASK_LOG: task_id=d-03 | category=code_debugging | tier=direct-remote | model=kimi-k2p7-code | approx_tokens=61 | validation=PASS | latency=3.33s
+TASK_LOG: task_id=f-01 | category=factual_knowledge | tier=local | model=local | approx_tokens=1 | validation=PASS | latency=4.42s
+TASK_LOG: task_id=c-03 | category=code_generation | tier=mid-fallback | model=minimax-m3 | approx_tokens=54 | validation=PASS | latency=6.22s
+TASK_LOG: task_id=f-04 | category=factual_knowledge | tier=local | model=local | approx_tokens=4 | validation=PASS | latency=6.71s
+TASK_LOG: task_id=s-03 | category=sentiment_classification | tier=cheap-remote | model=minimax-m3 | approx_tokens=35 | validation=PASS | latency=9.56s
+TASK_LOG: task_id=l-02 | category=logical_reasoning | tier=mid-fallback | model=minimax-m3 | approx_tokens=0 | validation=PASS | latency=10.71s
+TASK_LOG: task_id=sum-01 | category=summarization | tier=local | model=local | approx_tokens=20 | validation=PASS | latency=12.15s
+TASK_LOG: task_id=d-02 | category=code_debugging | tier=direct-remote | model=kimi-k2p7-code | approx_tokens=20 | validation=PASS | latency=12.86s
+TASK_LOG: task_id=c-01 | category=code_generation | tier=direct-remote | model=kimi-k2p7-code | approx_tokens=20 | validation=PASS | latency=13.26s
+TASK_LOG: task_id=l-03 | category=logical_reasoning | tier=code-fallback | model=kimi-k2p7-code | approx_tokens=0 | validation=PASS | latency=14.93s
+2026-07-09 16:43:33,870 [WARNING] agent: Task l-04: All models failed for Math/Logic. Falling back to emergency placeholder.
+TASK_LOG: task_id=l-04 | category=logical_reasoning | tier=code-fallback | model=kimi-k2p7-code | approx_tokens=2 | validation=FAIL | latency=15.27s
+2026-07-09 16:43:33,878 [WARNING] agent: Task m-04: All models failed for Math/Logic. Falling back to emergency placeholder.
+TASK_LOG: task_id=m-04 | category=math_reasoning | tier=code-fallback | model=kimi-k2p7-code | approx_tokens=2 | validation=FAIL | latency=15.30s
+2026-07-09 16:43:34,007 [WARNING] agent: Task m-01: All models failed for Math/Logic. Falling back to emergency placeholder.
+TASK_LOG: task_id=m-01 | category=math_reasoning | tier=code-fallback | model=kimi-k2p7-code | approx_tokens=2 | validation=FAIL | latency=15.44s
+TASK_LOG: task_id=sum-03 | category=summarization | tier=local | model=local | approx_tokens=33 | validation=PASS | latency=15.48s
+2026-07-09 16:43:34,847 [WARNING] agent: Task l-01: All models failed for Math/Logic. Falling back to emergency placeholder.
+TASK_LOG: task_id=l-01 | category=logical_reasoning | tier=code-fallback | model=kimi-k2p7-code | approx_tokens=2 | validation=FAIL | latency=16.26s
+2026-07-09 16:43:35,065 [WARNING] agent: Task c-02: All models failed for Code. Falling back to emergency placeholder.
+TASK_LOG: task_id=c-02 | category=code_generation | tier=reasoning-fallback | model=minimax-m3 | approx_tokens=25 | validation=FAIL | latency=16.46s
+TASK_LOG: task_id=sum-02 | category=summarization | tier=local | model=local | approx_tokens=45 | validation=PASS | latency=18.33s
+TASK_LOG: task_id=s-02 | category=sentiment_classification | tier=code-fallback | model=kimi-k2p7-code | approx_tokens=27 | validation=PASS | latency=24.21s
+TASK_LOG: task_id=n-01 | category=named_entity_recognition | tier=local | model=local | approx_tokens=43 | validation=PASS | latency=26.51s
+2026-07-09 16:43:56,472 [WARNING] agent: Task s-01: All remote models failed for Easy Category. Falling back to emergency placeholder.
+TASK_LOG: task_id=s-01 | category=sentiment_classification | tier=code-fallback | model=kimi-k2p7-code | approx_tokens=1 | validation=FAIL | latency=37.89s
+TASK_LOG: task_id=n-02 | category=named_entity_recognition | tier=mid-remote | model=minimax-m3 | approx_tokens=54 | validation=PASS | latency=41.93s
+TASK_LOG: task_id=n-03 | category=named_entity_recognition | tier=reasoning-fallback | model=minimax-m3 | approx_tokens=54 | validation=PASS | latency=63.96s
+2026-07-09 16:44:23,231 [INFO] agent: Finished. Results written to ./output/results.json
+
+Max latency: 63.96 s
+Min latency: 0.59 s
+Avg latency: 15.26 s

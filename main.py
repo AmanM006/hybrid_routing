@@ -291,7 +291,16 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
             try:
                 system_prompt = SYSTEM_PROMPTS.get(category, "Answer the query.")
                 user_prompt = prompt + "\n\nAnswer only. No explanation, no chain-of-thought, no preamble, no restating the question."
-                max_tokens = min(35 if category != "named_entity_recognition" else 70, get_max_tokens(category, prompt))
+                # Token budget per category: summarization needs room for a full sentence,
+                # sentiment needs label+justification, NER needs JSON, others stay concise.
+                if category == "summarization":
+                    max_tokens = 120
+                elif category == "sentiment_classification":
+                    max_tokens = 100
+                elif category == "named_entity_recognition":
+                    max_tokens = 70
+                else:
+                    max_tokens = min(35, get_max_tokens(category, prompt))
                 answer = await asyncio.wait_for(
                     call_local_model(system_prompt, user_prompt, max_tokens),
                     timeout=40.0

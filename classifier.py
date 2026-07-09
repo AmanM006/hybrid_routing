@@ -70,7 +70,11 @@ async def classify_prompt(prompt: str, local_llm_callable=None) -> str:
         return "logical_reasoning"
         
     # Pigeonhole / minimum guarantee problems
-    if re.search(r"minimum.*(?:guarantee|certain|sure)|guarantee.*minimum|must draw|to guarantee", prompt_lower):
+    if re.search(r"minimum.*(?:guarantee|certain|sure)|guarantee.*minimum|must draw|to guarantee|minimum number", prompt_lower):
+        return "logical_reasoning"
+        
+    # Conditional/propositional logic: "if X then Y", "does it necessarily follow", "did it necessarily"
+    if re.search(r"\bif\b.{1,60}\bthen\b|\bnecessarily\b|\bif and only if\b|\ball .{1,40} are\b", prompt_lower):
         return "logical_reasoning"
     
     # High-priority math puzzle / calculation check
@@ -78,10 +82,14 @@ async def classify_prompt(prompt: str, local_llm_callable=None) -> str:
     has_math_pattern = (
         re.search(r"\b\d+\b.*?(?:percent|%|remain|remains|remaining|total|each|sells|items)\b", prompt_lower) or
         re.search(r"(?:percent|%|remain|remains|remaining|total|each|sells|items)\b.*?\b\d+\b", prompt_lower) or
-        re.search(r"\d+%", prompt_lower) or  # direct % pattern e.g. "25% off"
-        # Rate/time/distance word problems: "20 gallons per minute", "60 mph", "how long"
-        re.search(r"\b\d+\b.*?\bper\b", prompt_lower) or
-        re.search(r"\b(how long|how many|how much|how far|how fast)\b.*?\b\d+\b", prompt_lower)
+        re.search(r"\d+%", prompt_lower) or  # direct % e.g. "25% off"
+        re.search(r"\b\d+\b.*?\bper\b", prompt_lower) or  # rate: "20 per minute"
+        re.search(r"\b(how long|how many|how much|how far|how fast)\b.*?\b\d+\b", prompt_lower) or
+        # Algebraic text: "x squared", "solve for", "equals", "equation"
+        re.search(r"\b(squared|cubed|equals|equation|solve for|expression|variable|coefficient)\b", prompt_lower) or
+        # Geometry: perimeter, area, length/width/height/radius with digits
+        (re.search(r"\b(perimeter|area|volume|radius|diameter|circumference|hypotenuse)\b", prompt_lower) and re.search(r"\d", prompt)) or
+        (re.search(r"\b(length|width|height|base)\b", prompt_lower) and re.search(r"\d+\s*(cm|m|km|ft|in|mm)", prompt_lower))
     )
     if has_math_pattern:
         return "math_reasoning"
