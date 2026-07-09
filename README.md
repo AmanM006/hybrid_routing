@@ -97,5 +97,29 @@ docker run \
 A GitHub Actions workflow is pre-configured in `.github/workflows/build-push.yml`. When you push to your repository, it automatically builds the AMD64 container and publishes it to the GitHub Container Registry:
 
 ```bash
-ghcr.io/<your-username>/<your-repo-name>:latest
+ghcr.io/amanm006/hybrid_routing-v1:v17
 ```
+
+### Hackathon submission (exact image reference)
+
+Use this **exact** string in the submission form (no `https://`, must include tag):
+
+```
+ghcr.io/amanm006/hybrid_routing-v1:v17
+```
+
+**Valid tags:** `v17`, `latest` (also `v017` / `v.017` aliases after CI rebuild)
+
+**Invalid (will cause PULL_ERROR):**
+- `ghcr.io/amanm006/hybrid-routing-v1:v17` (hyphen — package uses underscore)
+- `ghcr.io/amanm006/hybrid_routing-v1:v.017` (only after alias publish; use `v17` until then)
+- `ghcr.io/amanm006/hybrid_routing-v1` (missing tag)
+- `https://ghcr.io/...` (no URL prefix)
+
+Verify before submitting:
+```bash
+docker logout ghcr.io
+docker pull ghcr.io/amanm006/hybrid_routing-v1:v17
+```
+
+Package must be **Public**: GitHub → Packages → `hybrid_routing-v1` → Package settings → Change visibility.

@@ -55,6 +55,7 @@ jobs:
             type=ref,event=branch
             type=ref,event=tag
             type=sha,prefix=sha-
+            type=raw,value=latest,enable=${{ github.ref_type == 'tag' }}
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -72,3 +73,21 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # Publish pull-friendly alias tags (e.g. v17 -> v017, v.017) for submission forms
+      - name: Push version alias tags
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
+          DIGEST=$(docker buildx imagetools inspect "${IMAGE}:${TAG}" --format '{{json .Manifest.Digest}}' | tr -d '"')
+          echo "Source ${IMAGE}:${TAG} @ ${DIGEST}"
+          # v17 -> v017 and v.017 (common submission UI formats)
+          if echo "$TAG" | grep -Eq '^v[0-9]+$'; then
+            NUM="${TAG#v}"
+            docker buildx imagetools create \
+              -t "${IMAGE}:v0${NUM}" \
+              -t "${IMAGE}:v.${NUM}" \
+              -t "${IMAGE}:v.0${NUM}" \
+              "${IMAGE}@${DIGEST}"
+          fi
