@@ -53,6 +53,12 @@ FACTUAL_KEYWORDS = re.compile(
     re.IGNORECASE
 )
 
+# Spelled-out small numbers for conversational word problems (e.g. "twelve apples...four left")
+_NUMBER_WORDS = (
+    r"one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|"
+    r"sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred"
+)
+
 async def classify_prompt(prompt: str, local_llm_callable=None) -> str:
     """
     Classifies a prompt into one of the 8 categories using regex rules first, 
@@ -72,6 +78,31 @@ async def classify_prompt(prompt: str, local_llm_callable=None) -> str:
     # Pigeonhole / minimum guarantee problems
     if re.search(r"minimum.*(?:guarantee|certain|sure)|guarantee.*minimum|must draw|to guarantee|minimum number", prompt_lower):
         return "logical_reasoning"
+
+    # High-priority math — before propositional "if...then" (word problems often say "if someone bought...")
+    has_math_pattern = (
+        re.search(r"\b\d+\b.*?(?:percent|%|remain|remains|remaining|total|each|sells|items)\b", prompt_lower) or
+        re.search(r"(?:percent|%|remain|remains|remaining|total|each|sells|items)\b.*?\b\d+\b", prompt_lower) or
+        re.search(r"\d+%", prompt_lower) or
+        re.search(r"\b\d+\b.*?\bper\b", prompt_lower) or
+        re.search(r"\b(how long|how many|how much|how far|how fast)\b.*?\b\d+\b", prompt_lower) or
+        (re.search(r"\b(average|mean)\b", prompt_lower) and re.search(r"\d", prompt)) or
+        re.search(r"\bwhat is\s+[-\d].*?[+\-*/×÷]", prompt_lower) or
+        re.search(r"\bwhat is\s+.*?\d+\s*[+\-*/×÷]\s*[-\d]", prompt_lower) or
+        (
+            re.search(r"\bhow many\b.{0,120}\b(?:left|remain|remaining)\b", prompt_lower)
+            and (
+                re.search(r"\d", prompt)
+                or re.search(rf"\b(?:{_NUMBER_WORDS})\b", prompt_lower)
+                or re.search(r"\b(?:gave away|gives away|subtract|minus|sold|bought)\b", prompt_lower)
+            )
+        ) or
+        re.search(r"\b(squared|cubed|equals|equation|solve for|expression|variable|coefficient)\b", prompt_lower) or
+        (re.search(r"\b(perimeter|area|volume|radius|diameter|circumference|hypotenuse)\b", prompt_lower) and re.search(r"\d", prompt)) or
+        (re.search(r"\b(length|width|height|base)\b", prompt_lower) and re.search(r"\d+\s*(cm|m|km|ft|in|mm)", prompt_lower))
+    )
+    if has_math_pattern:
+        return "math_reasoning"
         
     # Conditional/propositional logic: "if X then Y", "did it necessarily"
     # Also catches syllogism patterns: "Every X is Y. A Z is an X."
@@ -93,23 +124,6 @@ async def classify_prompt(prompt: str, local_llm_callable=None) -> str:
     if re.search(r"\ball .{1,40} are\b", prompt_lower):
         return "logical_reasoning"
     
-    # High-priority math puzzle / calculation check
-    # Fix: \b word boundary doesn't work around %, so match % without \b
-    has_math_pattern = (
-        re.search(r"\b\d+\b.*?(?:percent|%|remain|remains|remaining|total|each|sells|items)\b", prompt_lower) or
-        re.search(r"(?:percent|%|remain|remains|remaining|total|each|sells|items)\b.*?\b\d+\b", prompt_lower) or
-        re.search(r"\d+%", prompt_lower) or  # direct % e.g. "25% off"
-        re.search(r"\b\d+\b.*?\bper\b", prompt_lower) or  # rate: "20 per minute"
-        re.search(r"\b(how long|how many|how much|how far|how fast)\b.*?\b\d+\b", prompt_lower) or
-        # Algebraic text: "x squared", "solve for", "equals", "equation"
-        re.search(r"\b(squared|cubed|equals|equation|solve for|expression|variable|coefficient)\b", prompt_lower) or
-        # Geometry: perimeter, area, length/width/height/radius with digits
-        (re.search(r"\b(perimeter|area|volume|radius|diameter|circumference|hypotenuse)\b", prompt_lower) and re.search(r"\d", prompt)) or
-        (re.search(r"\b(length|width|height|base)\b", prompt_lower) and re.search(r"\d+\s*(cm|m|km|ft|in|mm)", prompt_lower))
-    )
-    if has_math_pattern:
-        return "math_reasoning"
-        
     # Check for code blocks
     has_code_block = "```" in prompt
     

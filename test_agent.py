@@ -126,6 +126,16 @@ class TestGeneralPurposeAgent(unittest.IsolatedAsyncioTestCase):
             category = await classify_prompt(prompt)
             self.assertEqual(category, "factual_knowledge")
 
+    async def test_math_routing_edge_cases(self):
+        """Conversational / arithmetic prompts must route to math_reasoning, not factual."""
+        math_prompts = [
+            "What is -15 + 27?",
+            "What is the average of 12, 18, and 30?",
+            "Hey, if someone bought twelve apples and gave away four, how many would they have left?",
+        ]
+        for prompt in math_prompts:
+            self.assertEqual(await classify_prompt(prompt), "math_reasoning")
+
     async def test_edge_cases_classification(self):
         """
         Tests weird unicode prompts, super long inputs, prompts with no clear category,
