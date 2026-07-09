@@ -1,8 +1,9 @@
 import sys, re, glob, os
 sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 
-# Use the specific v10 pipeline run log
-log_path = r'C:\Users\cheer\.gemini\antigravity\brain\2853899a-c256-4afd-94a7-ad38c004bada\.system_generated\tasks\task-1871.log'
+# Use the specific v11 pipeline run log
+log_path = r'C:\Users\cheer\.gemini\antigravity\brain\2853899a-c256-4afd-94a7-ad38c004bada\.system_generated\tasks\task-1924.log'
+
 print('Using log:', os.path.basename(log_path))
 
 with open(log_path, encoding='utf-8', errors='replace') as f:
