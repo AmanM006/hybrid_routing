@@ -183,21 +183,36 @@ def validate_code(prompt: str, output: str, is_debugging: bool = False) -> bool:
     code_debugging / code_generation: output must contain a code block;
     for debugging, must differ meaningfully from input snippet;
     run basic syntax check if feasible.
+    Also accepts bare Python without ``` fences (auto-detected by ast.parse).
     """
+    # If no code fence, check if the raw output is valid Python and auto-wrap it
     if "```" not in output:
-        logger.warning("Code Validation Failed: Markdown code block wrapper '```' missing.")
-        return False
-        
+        output_stripped = output.strip()
+        is_python_candidate = ("def " in output_stripped or "import " in output_stripped
+                               or "return " in output_stripped or "class " in output_stripped)
+        if is_python_candidate:
+            try:
+                ast.parse(output_stripped)
+                # Valid bare Python — treat as if it were wrapped
+                output = f"```python\n{output_stripped}\n```"
+                logger.info("Code Validation: bare Python detected, treating as valid (no fences).")
+            except SyntaxError:
+                logger.warning("Code Validation Failed: Markdown code block wrapper '```' missing.")
+                return False
+        else:
+            logger.warning("Code Validation Failed: Markdown code block wrapper '```' missing.")
+            return False
+
     blocks = re.findall(r"```(?:\w+)?\n(.*?)\n```", output, re.DOTALL)
     if not blocks:
         logger.warning("Code Validation Failed: Empty code block.")
         return False
-        
+
     code_content = "\n".join(blocks).strip()
     if not code_content:
         logger.warning("Code Validation Failed: Code block content is blank.")
         return False
-        
+
     if is_debugging:
         # Extract code from prompt if any
         prompt_blocks = re.findall(r"```(?:\w+)?\n(.*?)\n```", prompt, re.DOTALL)
@@ -206,7 +221,7 @@ def validate_code(prompt: str, output: str, is_debugging: bool = False) -> bool:
             if code_content == prompt_code:
                 logger.warning("Code Validation Failed: Debugging output matches prompt snippet exactly.")
                 return False
-                
+
     # Run AST check if it is python code
     is_python = "python" in prompt.lower() or "def " in code_content or "import " in code_content or "print(" in code_content
     if is_python:
@@ -215,7 +230,7 @@ def validate_code(prompt: str, output: str, is_debugging: bool = False) -> bool:
         except SyntaxError as e:
             logger.warning(f"Code Validation Failed: Python syntax error: {e}")
             return False
-            
+
     return True
 
 def validate_category_output(category: str, prompt: str, output: str) -> bool:

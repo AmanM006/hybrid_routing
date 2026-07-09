@@ -218,9 +218,14 @@ class TestGeneralPurposeAgent(unittest.IsolatedAsyncioTestCase):
         invalid_python = "```python\ndef add(a, b):\n    return a + \n```" # Syntax error
         no_blocks = "def add(a, b): return a + b"
         
+        bare_valid_python = "def add(a, b): return a + b"       # valid bare Python — now accepted
+        bare_invalid_python = "def add(a b): return a + b"       # syntax error even bare — still rejected
+
         self.assertTrue(validate_category_output("code_generation", prompt, valid_python))
         self.assertFalse(validate_category_output("code_generation", prompt, invalid_python))
-        self.assertFalse(validate_category_output("code_generation", prompt, no_blocks))
+        self.assertTrue(validate_category_output("code_generation", prompt, bare_valid_python))   # auto-wrapped
+        self.assertFalse(validate_category_output("code_generation", prompt, bare_invalid_python)) # syntax error
+
 
 class TestMainLoop(unittest.IsolatedAsyncioTestCase):
 

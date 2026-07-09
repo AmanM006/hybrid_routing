@@ -246,6 +246,11 @@ class FireworksClient:
                 result_lower = result.lower()  # Update for next marker check
                 break
 
+        # Remove trailing junk left by bleed trimmer (e.g. dangling " 1." after cutting mid-sentence)
+        # Only applies when there's substantial content before the trailing token (> 30 chars)
+        if len(result) > 30:
+            result = re.sub(r'(?<=\s)\d{1,2}[.)]\s*$', '', result).strip()
+
         return result if result else text
 
 
