@@ -142,7 +142,8 @@ def validate_summarization(prompt: str, output: str) -> bool:
 def validate_factual(prompt: str, output: str) -> bool:
     """
     factual_knowledge: output must be non-empty, non-degenerate (not echoing question),
-    minimum reasonable length.
+    minimum reasonable length. Short precise answers (numbers, currency, Yes/No)
+    are valid and should never be rejected purely for brevity.
     """
     output_clean = output.strip()
     if not output_clean:
@@ -156,10 +157,8 @@ def validate_factual(prompt: str, output: str) -> bool:
         logger.warning("Factual Validation Failed: Output is a substring of the prompt.")
         return False
             
-    if len(output_clean) < 5:
-        logger.warning("Factual Validation Failed: Output too short.")
-        return False
-        
+    # Allow any non-empty answer — short answers like "$30", "3", "Yes", "100°C"
+    # are valid factual responses. Only reject truly empty strings (checked above).
     return True
 
 def validate_reasoning(output: str) -> bool:

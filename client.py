@@ -172,6 +172,42 @@ class FireworksClient:
             base_url=base_url
         )
 
+    def _scrub_cot(self, text: str, category: str) -> str:
+        """
+        Strip chain-of-thought preamble from model responses.
+        Code models used for sentiment/factual tasks sometimes expose their internal
+        reasoning. This method removes those lines before validation.
+        """
+        if not text:
+            return text
+        
+        # Don't scrub code responses — they're expected to be verbose
+        if category in ["code_generation", "code_debugging"]:
+            return text
+        
+        lines = text.strip().splitlines()
+        skip_prefixes = (
+            "the user wants", "the user asks", "the user said", "the user's question",
+            "let me", "i need to", "i will", "i should", "i must", "i'll",
+            "thinking:", "thought:", "analysis:", "reasoning:", "chain of thought",
+            "step 1", "step 2", "step 3", "first,", "second,", "third,",
+        )
+        cleaned_lines = []
+        for line in lines:
+            stripped = line.strip().lower()
+            if stripped.startswith(skip_prefixes):
+                continue
+            cleaned_lines.append(line)
+        
+        result = "\n".join(cleaned_lines).strip()
+        
+        # For sentiment: trim to max 2 sentences to avoid trailing cut-off garbage
+        if category == "sentiment_classification" and result:
+            sentences = re.split(r'(?<=[.!?])\s+', result)
+            result = " ".join(sentences[:2]).strip()
+        
+        return result if result else text
+
     async def call_api(self, model: str, category: str, prompt: str, timeout: float = 12.0) -> str:
         """
         Sends a request to the Fireworks API with identical prefixes, zero temperature,
@@ -206,12 +242,14 @@ class FireworksClient:
                     kwargs["extra_body"] = {"reasoning_effort": "none"}
                     
                 try:
+                    print(f"FIREWORKS_PAYLOAD: model={kwargs.get('model')} | extra_body={kwargs.get('extra_body')} | messages={kwargs.get('messages')}", flush=True)
                     response = await self.client.chat.completions.create(**kwargs)
                 except Exception as e:
                     # If reasoning_effort is not supported by the endpoint/SDK version, fall back
                     if "extra_body" in kwargs and any(err in str(e).lower() for err in ["reasoning_effort", "invalid", "unexpected", "400"]):
                         logger.warning(f"API call with reasoning_effort failed: {e}. Retrying without reasoning_effort parameter...")
                         del kwargs["extra_body"]
+                        print(f"FIREWORKS_PAYLOAD (RETRY): model={kwargs.get('model')} | extra_body={kwargs.get('extra_body')} | messages={kwargs.get('messages')}", flush=True)
                         response = await self.client.chat.completions.create(**kwargs)
                     else:
                         raise e
@@ -232,7 +270,7 @@ class FireworksClient:
                     
                 if final_text:
                     logger.info(f"API call to {model} succeeded on attempt {attempt+1}")
-                    return final_text
+                    return self._scrub_cot(final_text, category)
                 else:
                     raise ValueError("Received empty content and reasoning from remote model.")
             except Exception as e:

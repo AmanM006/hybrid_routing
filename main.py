@@ -142,6 +142,35 @@ async def verify_local_answer(category: str, prompt: str, answer: str) -> bool:
         logger.warning(f"Self-verification helper encountered error: {e}")
         return True
 
+def sanitize_response(text: str, category: str) -> str:
+    """
+    Strip chain-of-thought preamble and trailing noise from model outputs.
+    Code models sometimes expose their reasoning when used for non-code tasks.
+    Applies for sentiment/factual/summarization/logic categories.
+    """
+    if not text:
+        return text
+    lines = text.strip().splitlines()
+    # Strip lines that start with "The user wants..." or "The user asks..." or self-narration
+    skip_prefixes = (
+        "the user wants", "the user asks", "the user said",
+        "let me", "i need to", "i will", "i should", "i must",
+        "thinking:", "thought:", "analysis:", "reasoning:",
+        "step 1", "step 2", "step 3",
+    )
+    cleaned = []
+    for line in lines:
+        if line.strip().lower().startswith(skip_prefixes):
+            continue
+        cleaned.append(line)
+    result = "\n".join(cleaned).strip()
+    # For sentiment: if the response has "But the" or trailing clause cuts off mid-sentence, truncate
+    if category == "sentiment_classification" and result:
+        # Take only the first 2 sentences max
+        sentences = re.split(r'(?<=[.!?])\s+', result)
+        result = " ".join(sentences[:2]).strip()
+    return result if result else text
+
 def classify_model_roles(allowed_models):
     """
     Parses allowed_models into code, reasoning, cheap, and mid roles.
@@ -571,12 +600,13 @@ async def main():
     # 2. Setup client
     client = FireworksClient(api_key=api_key, base_url=base_url)
     
-    # Run startup model connectivity check
+    # Run startup model connectivity check — prune dead models from the role assignment
     logger.info("Starting Fireworks connectivity healthcheck for all allowed models...")
+    live_models = []
+    dead_models = []
     for model_name in allowed_models:
         try:
             logger.info(f"Healthcheck: sending test ping to {model_name}...")
-            # Fire a minimal test prompt
             await client.call_api(
                 model=model_name,
                 category="factual_knowledge",
@@ -584,8 +614,30 @@ async def main():
                 timeout=4.0
             )
             logger.info(f"Healthcheck for '{model_name}': SUCCESS (200)")
+            live_models.append(model_name)
         except Exception as e:
-            logger.warning(f"Healthcheck for '{model_name}': FAILED (404/Error: {e})")
+            err_str = str(e)
+            if "404" in err_str or "NOT_FOUND" in err_str or "not found" in err_str.lower():
+                logger.warning(f"Healthcheck for '{model_name}': DEAD (404 — removing from cascade)")
+                dead_models.append(model_name)
+            else:
+                # Non-404 failure (rate limit, timeout) — keep the model, may recover
+                logger.warning(f"Healthcheck for '{model_name}': SOFT_FAIL (keeping in cascade) — {e}")
+                live_models.append(model_name)
+    
+    if dead_models:
+        logger.warning(f"Pruned {len(dead_models)} dead models from cascade: {dead_models}")
+    
+    # Re-classify roles using only live models
+    if live_models:
+        roles = classify_model_roles(live_models)
+        print("=== UPDATED ROLE TABLE (live models only) ===")
+        for role, model in roles.items():
+            print(f"Role '{role}': {model}")
+        print("=============================================")
+    else:
+        logger.error("All models failed healthcheck — cannot process tasks.")
+
             
     # Set up paths
     input_path = "/input/tasks.json"

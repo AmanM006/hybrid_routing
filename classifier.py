@@ -28,7 +28,12 @@ MATH_KEYWORDS = re.compile(
     re.IGNORECASE
 )
 LOGIC_KEYWORDS = re.compile(
-    r"\b(puzzle|riddle|logic|deduce|conclude|premise|valid|sequence|pattern|grid|sudoku|knights|knaves|statement|truth|satisfy|rules|constraints|contradiction|if and only if)\b", 
+    r"\b(puzzle|riddle|logic|deduce|conclude|premise|valid|sequence|pattern|grid|sudoku|knights|knaves|statement|truth|satisfy|rules|constraints|contradiction|if and only if|minimum number|guarantee|at least|no more than|possible|impossible|always|never|some|all|none)\b", 
+    re.IGNORECASE
+)
+# Comparative reasoning patterns (X is older/taller/faster/bigger than Y → logical deduction)
+COMPARATIVE_LOGIC = re.compile(
+    r"\b(older|younger|taller|shorter|faster|slower|heavier|lighter|smarter|richer|bigger|smaller|more|less)\s+than\b",
     re.IGNORECASE
 )
 SENTIMENT_KEYWORDS = re.compile(
@@ -59,10 +64,24 @@ async def classify_prompt(prompt: str, local_llm_callable=None) -> str:
     if any(x in prompt_lower for x in ["who owns", "different pet", "does not own", "knights and knaves", "logic puzzle"]) or "if all" in prompt_lower or ("is a" in prompt_lower and "always" in prompt_lower):
         return "logical_reasoning"
         
+    # Comparative deductive reasoning (X older/taller than Y, therefore...)
+    comparative_matches = COMPARATIVE_LOGIC.findall(prompt_lower)
+    if len(comparative_matches) >= 2:  # Two comparisons → transitive deduction
+        return "logical_reasoning"
+        
+    # Pigeonhole / minimum guarantee problems
+    if re.search(r"minimum.*(?:guarantee|certain|sure)|guarantee.*minimum|must draw|to guarantee", prompt_lower):
+        return "logical_reasoning"
+    
     # High-priority math puzzle / calculation check
+    # Fix: \b word boundary doesn't work around %, so match % without \b
     has_math_pattern = (
-        re.search(r"\b\d+\b.*?\b(percent|%|remain|remains|remaining|total|each|sells|items)\b", prompt_lower) or 
-        re.search(r"\b(remain|remains|remaining|total|each|sells|items)\b.*?\b\d+\b", prompt_lower)
+        re.search(r"\b\d+\b.*?(?:percent|%|remain|remains|remaining|total|each|sells|items)\b", prompt_lower) or
+        re.search(r"(?:percent|%|remain|remains|remaining|total|each|sells|items)\b.*?\b\d+\b", prompt_lower) or
+        re.search(r"\d+%", prompt_lower) or  # direct % pattern e.g. "25% off"
+        # Rate/time/distance word problems: "20 gallons per minute", "60 mph", "how long"
+        re.search(r"\b\d+\b.*?\bper\b", prompt_lower) or
+        re.search(r"\b(how long|how many|how much|how far|how fast)\b.*?\b\d+\b", prompt_lower)
     )
     if has_math_pattern:
         return "math_reasoning"
