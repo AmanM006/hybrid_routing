@@ -85,9 +85,9 @@ jobs:
           # v17 -> v017 and v.017 (common submission UI formats)
           if echo "$TAG" | grep -Eq '^v[0-9]+$'; then
             NUM="${TAG#v}"
+            PADDED=$(printf "%03d" "$NUM")
             docker buildx imagetools create \
-              -t "${IMAGE}:v0${NUM}" \
-              -t "${IMAGE}:v.${NUM}" \
-              -t "${IMAGE}:v.0${NUM}" \
+              -t "${IMAGE}:v${PADDED}" \
+              -t "${IMAGE}:v.${PADDED}" \
               "${IMAGE}@${DIGEST}"
           fi
