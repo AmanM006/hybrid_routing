@@ -25,7 +25,11 @@ logger = logging.getLogger("agent")
 from classifier import classify_prompt
 from validators import validate_category_output, validate_ner
 from client import FireworksClient, get_max_tokens, get_emergency_fallback
-from deterministic_solvers import solve_math_deterministically, solve_ner_deterministically
+from deterministic_solvers import (
+    solve_math_deterministically,
+    solve_ner_deterministically,
+    solve_logic_deterministically,
+)
 
 
 # Model configuration
@@ -303,6 +307,15 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
         det_answer = solve_ner_deterministically(prompt)
         if det_answer is not None and validate_ner(det_answer):
             logger.info(f"Task {task_id}: Solved deterministically (NER). Answer={det_answer!r}")
+            latency = time.time() - start_time
+            print(f"TASK_LOG: task_id={task_id} | category={category} | tier=deterministic | "
+                  f"model=none | approx_tokens=0 | validation=PASS | latency={latency:.2f}s", flush=True)
+            return {"task_id": task_id, "answer": det_answer}
+
+    if category == "logical_reasoning":
+        det_answer = solve_logic_deterministically(prompt)
+        if det_answer is not None:
+            logger.info(f"Task {task_id}: Solved deterministically (logic constraint). Answer={det_answer!r}")
             latency = time.time() - start_time
             print(f"TASK_LOG: task_id={task_id} | category={category} | tier=deterministic | "
                   f"model=none | approx_tokens=0 | validation=PASS | latency={latency:.2f}s", flush=True)

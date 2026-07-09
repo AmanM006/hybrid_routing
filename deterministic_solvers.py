@@ -155,7 +155,88 @@ def solve_math_deterministically(prompt: str):
         logger.info(f"[DETERM-MATH] earnings {rate}*{days} = {result}")
         return _fmt(result)
 
+    # --- 10. Percentage increase / decrease ------------------------------------
+    # "A price of $200 increased by 15%. What is the new price?"
+    # "120 decreased by 25%. What is the result?"
+    m_base_inc = re.search(r"(\d+(?:\.\d+)?)\s+(?:is\s+)?increased\s+by\s+(\d+(?:\.\d+)?)\s*%", pl)
+    if m_base_inc:
+        base = float(m_base_inc.group(1))
+        pct = float(m_base_inc.group(2))
+        result = base * (1 + pct / 100.0)
+        logger.info(f"[DETERM-MATH] {base} increased by {pct}% = {result}")
+        return _fmt(result)
+
+    m_base_dec = re.search(r"(\d+(?:\.\d+)?)\s+(?:is\s+)?decreased\s+by\s+(\d+(?:\.\d+)?)\s*%", pl)
+    if not m_base_dec:
+        m_base_dec = re.search(r"(\d+(?:\.\d+)?)\s+(?:is\s+)?reduced\s+by\s+(\d+(?:\.\d+)?)\s*%", pl)
+    if m_base_dec:
+        base = float(m_base_dec.group(1))
+        pct = float(m_base_dec.group(2))
+        result = base * (1 - pct / 100.0)
+        logger.info(f"[DETERM-MATH] {base} decreased by {pct}% = {result}")
+        return _fmt(result)
+
+    # "X% increase over Y" / "X% more than Y"
+    m_pct_more = re.search(r"(\d+(?:\.\d+)?)\s*%\s+(?:increase|more)\s+(?:over|than)\s+(\d+(?:\.\d+)?)", pl)
+    if m_pct_more:
+        pct = float(m_pct_more.group(1))
+        base = float(m_pct_more.group(2))
+        result = base * (1 + pct / 100.0)
+        logger.info(f"[DETERM-MATH] {base} + {pct}% = {result}")
+        return _fmt(result)
+
+    # --- 11. Average of a list of numbers -------------------------------------
+    # "What is the average of 10, 20, and 30?"
+    # "Find the mean of 5, 15, 25, 35."
+    if re.search(r"\b(average|mean)\b", pl):
+        nums = re.findall(r"(\d+(?:\.\d+)?)", p)
+        if len(nums) >= 2:
+            values = [float(n) for n in nums]
+            result = sum(values) / len(values)
+            logger.info(f"[DETERM-MATH] average({values}) = {result}")
+            return _fmt(result)
+
+    # --- 12. Simple linear equation: "solve for x" ----------------------------
+    # "Solve for x: 2x + 3 = 11" → x = 4
+    # "If 3x - 6 = 9, what is x?"
+    # Pattern: ax + b = c  or  ax - b = c  (single variable, integer coefficients)
+    # GUARD: skip if differential or exponent notation detected
+    _has_exp_or_diff = bool(re.search(r"(\^|\*\*|d[yx]/d[yx]|dy|dx|d/d)", pl))
+    if not _has_exp_or_diff:
+        m_eq = re.search(
+            r"(\d*)\s*x\s*([\+\-])\s*(\d+(?:\.\d+)?)\s*=\s*(\d+(?:\.\d+)?)",
+            pl
+        )
+        if m_eq:
+            a_str = m_eq.group(1).strip()
+            a = float(a_str) if a_str else 1.0
+            if a == 0:
+                return None
+            op = m_eq.group(2)
+            b = float(m_eq.group(3))
+            c = float(m_eq.group(4))
+            # ax + b = c  →  x = (c - b) / a
+            # ax - b = c  →  x = (c + b) / a
+            if op == "+":
+                x = (c - b) / a
+            else:
+                x = (c + b) / a
+            logger.info(f"[DETERM-MATH] linear eq: {a}x {op} {b} = {c} → x = {x}")
+            return _fmt(x)
+
+        # Also handle: "Nx = C" (no +/- term)
+        m_simple = re.search(r"(\d+)\s*x\s*=\s*(\d+(?:\.\d+)?)", pl)
+        if m_simple:
+            a = float(m_simple.group(1))
+            if a == 0:
+                return None
+            c = float(m_simple.group(2))
+            x = c / a
+            logger.info(f"[DETERM-MATH] simple linear: {a}x = {c} → x = {x}")
+            return _fmt(x)
+
     return None  # Could not solve deterministically — fall through to LLM
+
 
 
 # ---------------------------------------------------------------------------
@@ -354,3 +435,200 @@ def solve_ner_deterministically(prompt: str):
     result = json.dumps({"entities": entities})
     logger.info(f"[DETERM-NER] Extracted {len(entities)} entities deterministically.")
     return result
+
+
+# ---------------------------------------------------------------------------
+# LOGIC CONSTRAINT SOLVER
+# ---------------------------------------------------------------------------
+# Only handles finite-domain assignment puzzles: N entities each assigned one
+# of N values, with positive ("X owns Y") and negative ("X does not own Y")
+# constraints.  Falls through on ANYTHING else (syllogisms, comparatives,
+# probability, pigeonhole, modus ponens/tollens).
+
+from itertools import permutations as _permutations
+
+
+# Verb stems with optional 's' for third-person singular ("own", "owns", etc.)
+_OWNS_VERBS = r"(?:owns?|has|haves?|likes?|prefers?|eats?|drinks?|drives?|wears?|plays?|uses?|gets?|takes?|sits?|stands?|live(?:s| in))"
+
+
+# Explicit fallthrough triggers — these are NOT constraint puzzles
+_FALLTHROUGH_PATTERNS = [
+    r"\b(warm[- ]blooded|mammal|faster|older|taller|heavier|smarter|bigger|smaller)\b",
+    r"\b(if the|power goes|lights (are|turn)|modus)\b",
+    r"\b(probability|chance|likely|marble|ball|bag contains)\b",
+    r"\b(syllogism|therefore|implies|entails)\b",
+    r"\b(is a|is an|is the)\b.{0,20}\b(is|are)\b",  # "A is a B. B is C. Is A C?"
+]
+
+
+def _parse_constraint_puzzle(pl: str):
+    """
+    Try to parse a finite-domain assignment puzzle.
+    Returns (entities_list, values_list, positive_constraints, negative_constraints)
+    or None if parsing fails.
+    """
+    # --- Reject non-constraint prompts immediately ---
+    for pat in _FALLTHROUGH_PATTERNS:
+        if re.search(pat, pl, re.IGNORECASE):
+            return None
+
+    # --- Require a "who" or "what does X" query ---
+    if not re.search(
+        r"\bwho\b.{0,50}\b" + _OWNS_VERBS + r"|"
+        r"what\s+does\s+[a-z]+\s+" + _OWNS_VERBS,
+        pl, re.IGNORECASE
+    ):
+        return None
+
+    # --- Extract people: comma/and-separated Title-Case names before the verb ---
+    # Pattern: "Sam, Jo, and Lee each own one of: cat, dog, bird."
+    entity_match = re.search(
+        r"([A-Z][a-z]+(?:,\s*[A-Z][a-z]+)*(?:,?\s+and\s+[A-Z][a-z]+)?)\s+"
+        r"(?:each\s+)?(?:" + _OWNS_VERBS + r")",
+        pl
+    )
+    if not entity_match:
+        return None
+    entity_str = entity_match.group(1)
+    entities = re.findall(r"[A-Z][a-z]+", entity_str)
+    if len(entities) < 2 or len(entities) > 5:
+        return None
+
+    entities_l = [e.lower() for e in entities]
+
+    # --- Extract values: multiple patterns ---
+    # Priority 1: "one of: X, Y, Z" or "one of the following: X, Y, Z"
+    # Priority 2: "different pets: X, Y, Z" (category noun MUST be followed by colon)
+    val_match = re.search(
+        r"(?:"
+        r"one of[:\s]+"
+        r"|(?:different\s+)?(?:pet|color|sport|subject|house|car|drink|flower|job|fruit|language|country)s?\s*:\s*"
+        r")"
+        r"([a-z]+(?:,\s*[a-z]+)*(?:(?:,\s*)?(?:and|or)\s+[a-z]+)?)",
+        pl.lower()
+    )
+    if not val_match:
+        return None
+
+    val_str = val_match.group(1)
+    values = [v.strip().rstrip(".") for v in re.split(r",\s*|\s+(?:and|or)\s+", val_str) if v.strip()]
+    values = [v for v in values if len(v) > 1 and v not in ("the", "a", "an", "of")]
+
+    if len(values) != len(entities):
+        return None  # domain size mismatch — unsafe
+
+    values_l = values  # already lowercase from .lower()
+
+    # --- Parse constraints ---
+    pos_constraints = []
+    neg_constraints = []
+
+    sentences = re.split(r"[.!?]\s*", pl.lower())
+    for sent in sentences:
+        s = sent.strip()
+
+        # Positive: "Jo owns the dog" / "Sam likes cats"
+        m_pos = re.search(
+            r"\b([a-z]+)\b\s+(?:" + _OWNS_VERBS + r")\s+(?:the\s+|a\s+)?([a-z]+)\b",
+            s
+        )
+        if m_pos:
+            ent, val = m_pos.group(1), m_pos.group(2)
+            if ent in entities_l and val in values_l:
+                pos_constraints.append((ent, val))
+
+        # Negative: "Sam does not own the bird" / "Lee doesn't like cats"
+        m_neg = re.search(
+            r"\b([a-z]+)\b\s+(?:does\s+not|doesn'?t|cannot|can'?t|is\s+not)\s+"
+            r"(?:" + _OWNS_VERBS + r")\s+(?:the\s+|a\s+)?([a-z]+)\b",
+            s
+        )
+        if m_neg:
+            ent, val = m_neg.group(1), m_neg.group(2)
+            if ent in entities_l and val in values_l:
+                neg_constraints.append((ent, val))
+
+    return entities_l, values_l, pos_constraints, neg_constraints
+
+
+def _apply_constraints(assignment, pos_constraints, neg_constraints):
+    """
+    assignment: dict {entity_l: value_l}
+    Returns True if all constraints satisfied.
+    """
+    for ent, val in pos_constraints:
+        if assignment.get(ent) != val:
+            return False
+    for ent, val in neg_constraints:
+        if assignment.get(ent) == val:
+            return False
+    return True
+
+
+def solve_logic_deterministically(prompt: str):
+    """
+    Attempt to solve a finite-domain assignment constraint puzzle.
+
+    Safety rules:
+    - Only handles "who owns/likes/has X" puzzles with N entities and N values.
+    - Brute-forces all permutations and returns only if EXACTLY ONE solution exists.
+    - NEVER attempts syllogisms, comparative chains, probability, pigeonhole.
+    - Returns None on any ambiguity, parse failure, or multiple/zero solutions.
+    """
+    pl = prompt.lower()
+
+    parsed = _parse_constraint_puzzle(prompt)  # pass original for Title-Case parsing
+    if parsed is None:
+        return None
+
+    entities_l, values_l, pos_constraints, neg_constraints = parsed
+
+    # If we have no constraints at all, it's ambiguous — fall through
+    if not pos_constraints and not neg_constraints:
+        logger.info("[DETERM-LOGIC] No constraints found — falling through.")
+        return None
+
+    # Brute force all permutations
+    valid_solutions = []
+    for perm in _permutations(values_l):
+        assignment = dict(zip(entities_l, perm))
+        if _apply_constraints(assignment, pos_constraints, neg_constraints):
+            valid_solutions.append(assignment)
+
+    if len(valid_solutions) != 1:
+        # 0 = contradiction in puzzle, >1 = underdetermined — both fall through
+        logger.info(
+            f"[DETERM-LOGIC] {len(valid_solutions)} solutions found — "
+            "falling through (need exactly 1)."
+        )
+        return None
+
+    solution = valid_solutions[0]
+    logger.info(f"[DETERM-LOGIC] Unique solution: {solution}")
+
+    # Find what the query asks for
+    # "Who owns the cat?" → find entity whose value == "cat"
+    query_match = re.search(
+        r"who\s+(?:" + _OWNS_VERBS + r")\s+(?:the\s+|a\s+)?([a-z]+)\??",
+        pl
+    )
+    if query_match:
+        queried_val = query_match.group(1).rstrip("?").strip()
+        for ent, val in solution.items():
+            if val == queried_val:
+                return ent.capitalize()
+        return None  # queried value not in solution — shouldn't happen
+
+    # "What does Sam own?" → find value assigned to "sam"
+    query_ent_match = re.search(
+        r"what\s+(?:does\s+)?([a-z]+)\s+(?:" + _OWNS_VERBS + r")",
+        pl
+    )
+    if query_ent_match:
+        queried_ent = query_ent_match.group(1)
+        if queried_ent in solution:
+            return solution[queried_ent].capitalize()
+
+    return None  # can't determine what is being asked
+
