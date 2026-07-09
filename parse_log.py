@@ -2,7 +2,8 @@ import sys, re, glob, os
 sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 
 # Use the specific v13 pipeline run log
-log_path = r'C:\Users\cheer\.gemini\antigravity\brain\2853899a-c256-4afd-94a7-ad38c004bada\.system_generated\tasks\task-2129.log'
+log_path = r'C:\Users\cheer\.gemini\antigravity\brain\2853899a-c256-4afd-94a7-ad38c004bada\.system_generated\tasks\task-2227.log'
+
 
 
 

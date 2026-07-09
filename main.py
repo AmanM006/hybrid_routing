@@ -23,8 +23,10 @@ logger = logging.getLogger("agent")
 
 # Import system modules
 from classifier import classify_prompt
-from validators import validate_category_output
+from validators import validate_category_output, validate_ner
 from client import FireworksClient, get_max_tokens, get_emergency_fallback
+from deterministic_solvers import solve_math_deterministically, solve_ner_deterministically
+
 
 # Model configuration
 MODEL_DIR = os.path.join(os.path.dirname(__file__), "models")
@@ -274,8 +276,9 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
     easy_categories = [
         "factual_knowledge", 
         "sentiment_classification", 
-        "summarization", 
-        "named_entity_recognition"
+        "summarization",
+        # NOTE: named_entity_recognition is intentionally excluded from easy_categories.
+        # It has its own deterministic first-pass above and goes direct-remote if that fails.
     ]
     
     tier_used = "unknown"
@@ -283,6 +286,27 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
     answer = ""
     validation_pass = False
     start_time = time.time()
+
+    # 2. DETERMINISTIC FIRST-PASS — zero tokens, zero risk
+    # Math: solve purely with code; NER: extract with regex.
+    # Both return None on any ambiguity so the cascade handles it.
+    if category == "math_reasoning":
+        det_answer = solve_math_deterministically(prompt)
+        if det_answer is not None:
+            logger.info(f"Task {task_id}: Solved deterministically (math). Answer={det_answer!r}")
+            latency = time.time() - start_time
+            print(f"TASK_LOG: task_id={task_id} | category={category} | tier=deterministic | "
+                  f"model=none | approx_tokens=0 | validation=PASS | latency={latency:.2f}s", flush=True)
+            return {"task_id": task_id, "answer": det_answer}
+
+    if category == "named_entity_recognition":
+        det_answer = solve_ner_deterministically(prompt)
+        if det_answer is not None and validate_ner(det_answer):
+            logger.info(f"Task {task_id}: Solved deterministically (NER). Answer={det_answer!r}")
+            latency = time.time() - start_time
+            print(f"TASK_LOG: task_id={task_id} | category={category} | tier=deterministic | "
+                  f"model=none | approx_tokens=0 | validation=PASS | latency={latency:.2f}s", flush=True)
+            return {"task_id": task_id, "answer": det_answer}
     
     # 2. Local Tier (Easy categories)
     if category in easy_categories and not local_disabled:
@@ -556,6 +580,69 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
                 if not validation_pass:
                     logger.warning(f"Task {task_id}: All models failed for Code. Falling back to emergency placeholder.")
                     answer = get_emergency_fallback(category, prompt)
+
+            elif category == "named_entity_recognition":
+                # Accuracy-first: go straight to reasoning model (needs correct JSON schema)
+                if roles.get("reasoning"):
+                    tier_used = "direct-remote"
+                    model_name = roles["reasoning"]
+                    try:
+                        answer = await client.call_api(
+                            model=roles["reasoning"],
+                            category=category,
+                            prompt=prompt,
+                            timeout=14.0
+                        )
+                        validation_pass = validate_category_output(category, prompt, answer)
+                        if validation_pass:
+                            logger.info(f"Task {task_id}: NER reasoning model passed validation.")
+                    except Exception as e:
+                        logger.warning(f"Task {task_id}: NER reasoning model failed: {e}. Escalating...")
+
+                # Fallback: mid model
+                if not validation_pass and roles.get("mid"):
+                    tier_used = "mid-fallback"
+                    model_name = roles["mid"]
+                    try:
+                        logger.info(f"Task {task_id}: NER falling back to mid model: {model_name}")
+                        answer = await client.call_api(
+                            model=roles["mid"],
+                            category=category,
+                            prompt=prompt,
+                            timeout=12.0
+                        )
+                        validation_pass = validate_category_output(category, prompt, answer)
+                        if validation_pass:
+                            logger.info(f"Task {task_id}: NER mid model passed validation.")
+                    except Exception as e:
+                        logger.warning(f"Task {task_id}: NER mid model failed: {e}")
+
+                if not validation_pass:
+                    logger.warning(f"Task {task_id}: All models failed for NER. Falling back to emergency placeholder.")
+                    answer = get_emergency_fallback(category, prompt)
+
+            else:
+                # Catch-all for any unhandled category (e.g. factual_knowledge when local disabled)
+                best_model = roles.get("reasoning") or roles.get("mid") or roles.get("cheap")
+                if best_model:
+                    tier_used = "direct-remote"
+                    model_name = best_model
+                    try:
+                        answer = await client.call_api(
+                            model=best_model,
+                            category=category,
+                            prompt=prompt,
+                            timeout=12.0
+                        )
+                        validation_pass = validate_category_output(category, prompt, answer)
+                        if validation_pass:
+                            logger.info(f"Task {task_id}: Catch-all model passed validation.")
+                    except Exception as e:
+                        logger.warning(f"Task {task_id}: Catch-all model failed: {e}")
+
+                if not validation_pass:
+                    answer = get_emergency_fallback(category, prompt)
+
                             
     # Log information to stdout only
     latency = time.time() - start_time
