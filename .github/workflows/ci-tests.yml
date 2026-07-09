@@ -1,0 +1,40 @@
+name: CI Tests
+
+on:
+  push:
+    branches: [ "main", "master" ]
+    tags: [ "*" ]
+  pull_request:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Docker COPY audit (import chain vs Dockerfile)
+        run: python check_docker_copy.py
+
+      - name: Deterministic solver edge suite (63 cases)
+        run: python test_solvers_edge.py
+
+      - name: Basic solver tests
+        run: python test_solvers.py
+
+      - name: Resilience tests
+        run: python test_resilience.py
+
+      - name: Adversarial + cascade tests
+        run: python test_adversarial.py
+
+      - name: Agent unit tests
+        run: python test_agent.py

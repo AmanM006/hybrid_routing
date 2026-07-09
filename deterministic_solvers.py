@@ -221,7 +221,7 @@ def _solve_math_deterministically(prompt: str):
                 x = (c - b) / a
             else:
                 x = (c + b) / a
-            logger.info(f"[DETERM-MATH] linear eq: {a}x {op} {b} = {c} → x = {x}")
+            logger.info(f"[DETERM-MATH] linear eq: {a}x {op} {b} = {c} -> x = {x}")
             return _fmt(x)
 
         # Also handle: "Nx = C" (no +/- term)
@@ -232,7 +232,7 @@ def _solve_math_deterministically(prompt: str):
                 return None
             c = float(m_simple.group(2))
             x = c / a
-            logger.info(f"[DETERM-MATH] simple linear: {a}x = {c} → x = {x}")
+            logger.info(f"[DETERM-MATH] simple linear: {a}x = {c} -> x = {x}")
             return _fmt(x)
 
     return None  # Could not solve deterministically — fall through to LLM

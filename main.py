@@ -23,7 +23,7 @@ logger = logging.getLogger("agent")
 
 # Import system modules
 from classifier import classify_prompt
-from validators import validate_category_output, validate_ner
+from validators import validate_category_output, validate_ner, verify_math_self_consistency
 from client import FireworksClient, get_max_tokens, get_emergency_fallback
 from deterministic_solvers import (
     solve_math_deterministically,
@@ -249,6 +249,23 @@ def classify_model_roles(allowed_models):
         "mid": mid_model
     }
 
+
+def _math_output_valid(prompt: str, answer: str) -> bool:
+    """Structural + self-consistency validation for math LLM answers."""
+    if not validate_category_output("math_reasoning", prompt, answer):
+        return False
+    if not verify_math_self_consistency(prompt, answer):
+        logger.info("Math answer failed self-consistency check — escalating.")
+        return False
+    return True
+
+
+def _validate_output(category: str, prompt: str, answer: str) -> bool:
+    if category == "math_reasoning":
+        return _math_output_valid(prompt, answer)
+    return validate_category_output(category, prompt, answer)
+
+
 def write_output_results(results_map, output_path):
     """
     Writes the current state of results atomically.
@@ -352,7 +369,7 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
                     timeout=40.0
                 )
                 answer = client._scrub_cot(raw_answer, category)
-                validation_pass = validate_category_output(category, prompt, answer)
+                validation_pass = _validate_output(category, prompt, answer)
                 if validation_pass:
                     verification_pass = await verify_local_answer(category, prompt, answer)
                     if verification_pass:
@@ -381,7 +398,7 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
                         prompt=prompt,
                         timeout=9.0
                     )
-                    validation_pass = validate_category_output(category, prompt, answer)
+                    validation_pass = _validate_output(category, prompt, answer)
                     if validation_pass:
                         logger.info(f"Task {task_id}: Cheap remote model passed validation.")
                 except Exception as e:
@@ -398,7 +415,7 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
                         prompt=prompt,
                         timeout=9.0
                     )
-                    validation_pass = validate_category_output(category, prompt, answer)
+                    validation_pass = _validate_output(category, prompt, answer)
                     if validation_pass:
                         logger.info(f"Task {task_id}: Mid remote model passed validation.")
                 except Exception as e:
@@ -416,7 +433,7 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
                         prompt=prompt,
                         timeout=12.0
                     )
-                    validation_pass = validate_category_output(category, prompt, answer)
+                    validation_pass = _validate_output(category, prompt, answer)
                     if validation_pass:
                         logger.info(f"Task {task_id}: Easy category reasoning fallback passed validation.")
                 except Exception as e:
@@ -434,7 +451,7 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
                         prompt=prompt,
                         timeout=12.0
                     )
-                    validation_pass = validate_category_output(category, prompt, answer)
+                    validation_pass = _validate_output(category, prompt, answer)
                     if validation_pass:
                         logger.info(f"Task {task_id}: Easy category code fallback passed validation.")
                 except Exception as e:
@@ -461,7 +478,7 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
                             prompt=prompt,
                             timeout=14.0
                         )
-                        validation_pass = validate_category_output(category, prompt, answer)
+                        validation_pass = _validate_output(category, prompt, answer)
                         if validation_pass:
                             logger.info(f"Task {task_id}: Reasoning model passed validation.")
                     except Exception as e:
@@ -479,7 +496,7 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
                             prompt=prompt,
                             timeout=12.0
                         )
-                        validation_pass = validate_category_output(category, prompt, answer)
+                        validation_pass = _validate_output(category, prompt, answer)
                         if validation_pass:
                             logger.info(f"Task {task_id}: Math/Logic mid fallback model passed validation.")
                     except Exception as e:
@@ -497,7 +514,7 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
                             prompt=prompt,
                             timeout=10.0
                         )
-                        validation_pass = validate_category_output(category, prompt, answer)
+                        validation_pass = _validate_output(category, prompt, answer)
                         if validation_pass:
                             logger.info(f"Task {task_id}: Math/Logic cheap fallback model passed validation.")
                     except Exception as e:
@@ -515,7 +532,7 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
                             prompt=prompt,
                             timeout=12.0
                         )
-                        validation_pass = validate_category_output(category, prompt, answer)
+                        validation_pass = _validate_output(category, prompt, answer)
                         if validation_pass:
                             logger.info(f"Task {task_id}: Math/Logic code fallback model passed validation.")
                     except Exception as e:
@@ -538,7 +555,7 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
                             prompt=prompt,
                             timeout=14.0
                         )
-                        validation_pass = validate_category_output(category, prompt, answer)
+                        validation_pass = _validate_output(category, prompt, answer)
                         if validation_pass:
                             logger.info(f"Task {task_id}: Code model passed validation.")
                     except Exception as e:
@@ -556,7 +573,7 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
                             prompt=prompt,
                             timeout=12.0
                         )
-                        validation_pass = validate_category_output(category, prompt, answer)
+                        validation_pass = _validate_output(category, prompt, answer)
                         if validation_pass:
                             logger.info(f"Task {task_id}: Code mid fallback model passed validation.")
                     except Exception as e:
@@ -574,7 +591,7 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
                             prompt=prompt,
                             timeout=10.0
                         )
-                        validation_pass = validate_category_output(category, prompt, answer)
+                        validation_pass = _validate_output(category, prompt, answer)
                         if validation_pass:
                             logger.info(f"Task {task_id}: Code cheap fallback model passed validation.")
                     except Exception as e:
@@ -592,7 +609,7 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
                             prompt=prompt,
                             timeout=12.0
                         )
-                        validation_pass = validate_category_output(category, prompt, answer)
+                        validation_pass = _validate_output(category, prompt, answer)
                         if validation_pass:
                             logger.info(f"Task {task_id}: Code reasoning fallback model passed validation.")
                     except Exception as e:
@@ -615,7 +632,7 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
                             prompt=prompt,
                             timeout=14.0
                         )
-                        validation_pass = validate_category_output(category, prompt, answer)
+                        validation_pass = _validate_output(category, prompt, answer)
                         if validation_pass:
                             logger.info(f"Task {task_id}: NER reasoning model passed validation.")
                     except Exception as e:
@@ -633,7 +650,7 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
                             prompt=prompt,
                             timeout=12.0
                         )
-                        validation_pass = validate_category_output(category, prompt, answer)
+                        validation_pass = _validate_output(category, prompt, answer)
                         if validation_pass:
                             logger.info(f"Task {task_id}: NER mid model passed validation.")
                     except Exception as e:
@@ -656,7 +673,7 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
                             prompt=prompt,
                             timeout=12.0
                         )
-                        validation_pass = validate_category_output(category, prompt, answer)
+                        validation_pass = _validate_output(category, prompt, answer)
                         if validation_pass:
                             logger.info(f"Task {task_id}: Catch-all model passed validation.")
                     except Exception as e:

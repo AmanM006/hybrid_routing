@@ -150,6 +150,71 @@ def validate_factual(prompt: str, output: str) -> bool:
     # are valid factual responses. Only reject truly empty strings (checked above).
     return True
 
+def _extract_numeric_answer(text: str):
+    """Pull the most likely final numeric value from a math answer string."""
+    cleaned = re.sub(r"^[Aa]nswer:\s*", "", text.strip())
+    # Prefer explicit Answer: line
+    m = re.search(r"(?i)answer:\s*(-?\d+(?:\.\d+)?)", cleaned)
+    if m:
+        return float(m.group(1))
+    nums = re.findall(r"-?\d+(?:\.\d+)?", cleaned)
+    if nums:
+        return float(nums[-1])
+    return None
+
+
+def verify_math_self_consistency(prompt: str, answer: str) -> bool:
+    """
+    Plug-back sanity check for LLM math answers (no API call).
+    Returns True if consistent OR not verifiable; False only on clear mismatch.
+    """
+    try:
+        got = _extract_numeric_answer(answer)
+        if got is None:
+            return True
+        pl = prompt.lower()
+
+        def _close(expected: float) -> bool:
+            if expected == 0:
+                return abs(got) < 1e-6
+            return abs(got - expected) <= max(1e-6, abs(expected) * 0.02)
+
+        m = re.search(
+            r"(?:what\s+is|calculate|compute|find|evaluate|solve)[\s:]*"
+            r"(-?\d+(?:\.\d+)?)\s*([+\-*/×÷])\s*(-?\d+(?:\.\d+)?)",
+            pl,
+        )
+        if m:
+            a, op, b = float(m.group(1)), m.group(2), float(m.group(3))
+            ops = {"+": a + b, "-": a - b, "*": a * b, "×": a * b, "/": a / b if b else None, "÷": a / b if b else None}
+            expected = ops.get(op)
+            if expected is not None and not _close(expected):
+                logger.warning(f"Math self-check FAIL: {a}{op}{b}={expected}, got {got}")
+                return False
+
+        m = re.search(r"(-?\d+(?:\.\d+)?)\s*%\s*of\s*(-?\d+(?:\.\d+)?)", pl)
+        if m:
+            expected = float(m.group(1)) / 100.0 * float(m.group(2))
+            if not _close(expected):
+                logger.warning(f"Math self-check FAIL: {m.group(1)}% of {m.group(2)}={expected}, got {got}")
+                return False
+
+        m = re.search(r"(-?\d*)\s*x\s*([+\-])\s*(-?\d+(?:\.\d+)?)\s*=\s*(-?\d+(?:\.\d+)?)", pl)
+        if m and not re.search(r"(\^|\*\*|d[yx]/d)", pl):
+            a = float(m.group(1)) if m.group(1).strip() else 1.0
+            if a != 0:
+                b, c = float(m.group(3)), float(m.group(4))
+                expected = (c - b) / a if m.group(2) == "+" else (c + b) / a
+                if not _close(expected):
+                    logger.warning(f"Math self-check FAIL: linear eq expected {expected}, got {got}")
+                    return False
+
+        return True
+    except Exception as e:
+        logger.warning(f"Math self-check skipped due to error: {e}")
+        return True
+
+
 def validate_reasoning(output: str) -> bool:
     """
     math_reasoning / logical_reasoning: output must be non-empty and of reasonable length.

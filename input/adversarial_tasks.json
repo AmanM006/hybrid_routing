@@ -1,0 +1,110 @@
+[
+  {
+    "task_id": "adv-m01",
+    "prompt": "Hey, so my friend was wondering — if someone bought twelve apples and then gave away four, how many would they have left? Just the number please.",
+    "category_hint": "math_reasoning",
+    "expected": "8"
+  },
+  {
+    "task_id": "adv-s01",
+    "prompt": "Classify the sentiment (positive/negative/neutral): The hotel lobby was stunning and the staff greeted us warmly, but our room smelled of mildew and the shower barely worked.",
+    "category_hint": "sentiment_classification",
+    "expected": "mixed/negative"
+  },
+  {
+    "task_id": "adv-l01",
+    "prompt": "Sam, Jo, and Lee each own one of: cat, dog, bird. Jo owns the dog. Sam does not own the bird. The weather was sunny that day. Who owns the cat?",
+    "category_hint": "logical_reasoning",
+    "expected": "Sam"
+  },
+  {
+    "task_id": "adv-x01",
+    "prompt": "Extract all named entities from this text AND summarize it in one sentence: Satya Nadella announced new AI features at Microsoft headquarters in Redmond.",
+    "category_hint": "ambiguous",
+    "expected": "classifier picks one category"
+  },
+  {
+    "task_id": "adv-n01",
+    "prompt": "Extract entities from: François Mitterrand met with Helmut Kohl in München during 1987.",
+    "category_hint": "named_entity_recognition",
+    "expected": "François Mitterrand, Helmut Kohl, München, 1987"
+  },
+  {
+    "task_id": "adv-m02",
+    "prompt": "What is -15 + 27?",
+    "category_hint": "math_reasoning",
+    "expected": "12"
+  },
+  {
+    "task_id": "adv-m03",
+    "prompt": "What is 100 divided by 0?",
+    "category_hint": "math_reasoning",
+    "expected": "undefined/fallthrough"
+  },
+  {
+    "task_id": "adv-m04",
+    "prompt": "What is 0% of 500?",
+    "category_hint": "math_reasoning",
+    "expected": "0"
+  },
+  {
+    "task_id": "adv-d01",
+    "prompt": "This function should return the last element but has a bug:\ndef last(items):\n    for i in range(len(items)):\n        return items[i]\nFind and fix it.",
+    "category_hint": "code_debugging",
+    "expected": "return items[-1] or items[len(items)-1]"
+  },
+  {
+    "task_id": "adv-f01",
+    "prompt": "What is the boiling point of water at sea level in Celsius?",
+    "category_hint": "factual_knowledge",
+    "expected": "100"
+  },
+  {
+    "task_id": "adv-sum01",
+    "prompt": "Summarize in exactly 1 sentence: The James Webb Space Telescope launched in 2021 and captures infrared images of distant galaxies.",
+    "category_hint": "summarization",
+    "expected": "one sentence about JWST"
+  },
+  {
+    "task_id": "adv-m05",
+    "prompt": "A store marks down a $80 jacket by 25%. What is the sale price?",
+    "category_hint": "math_reasoning",
+    "expected": "60"
+  },
+  {
+    "task_id": "adv-l02",
+    "prompt": "All roses are flowers. Some flowers fade quickly. Can we conclude all roses fade quickly? Answer yes or no.",
+    "category_hint": "logical_reasoning",
+    "expected": "No"
+  },
+  {
+    "task_id": "adv-n02",
+    "prompt": "Extract entities from: iPhone sales rose after Apple Inc. CEO Tim Cook spoke in Cupertino.",
+    "category_hint": "named_entity_recognition",
+    "expected": "iPhone, Apple Inc., Tim Cook, Cupertino"
+  },
+  {
+    "task_id": "adv-c01",
+    "prompt": "Write a Python function that returns True if a string is a palindrome.",
+    "category_hint": "code_generation",
+    "expected": "valid palindrome function"
+  },
+  {
+    "task_id": "adv-m06",
+    "prompt": "Solve for x: 4x - 8 = 12",
+    "category_hint": "math_reasoning",
+    "expected": "5"
+  },
+  {
+    "task_id": "adv-s02",
+    "prompt": "Classify sentiment: Best product ever!!! Though shipping took forever.",
+    "category_hint": "sentiment_classification",
+    "expected": "mixed/positive"
+  },
+  {
+    "task_id": "adv-m07",
+    "prompt": "What is the average of 12, 18, and 30?",
+    "category_hint": "math_reasoning",
+    "expected": "20"
+  }
+]

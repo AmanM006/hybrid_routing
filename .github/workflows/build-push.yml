@@ -11,7 +11,23 @@ env:
   IMAGE_NAME: amanm006/hybrid_routing-v1
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt
+      - run: python check_docker_copy.py
+      - run: python test_solvers_edge.py
+      - run: python test_solvers.py
+      - run: python test_resilience.py
+      - run: python test_adversarial.py
+      - run: python test_agent.py
+
   build-and-push:
+    needs: test
     # Only build once per commit — skip duplicate runs triggered by tag push
     # when the same commit already has a branch build in progress
     runs-on: ubuntu-latest

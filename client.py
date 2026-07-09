@@ -7,45 +7,36 @@ import re
 
 logger = logging.getLogger(__name__)
 
-# Category instructions for maximum prompt caching benefit
+# Category instructions — kept lean for token efficiency
 SYSTEM_PROMPTS = {
     "named_entity_recognition": (
-        "You are an expert Named Entity Recognition (NER) system. "
-        "Extract all entities from the text. You must output the results in a valid JSON object matching the schema: "
-        '{"entities": [{"text": "<entity_text>", "type": "<PERSON|ORG|LOCATION|DATE|...>"}]}. '
-        "Do not include any markdown styling, code block wrappers (like ```json), introduction, or explanation. Output only raw JSON."
+        "Extract entities from the text. Output raw JSON only: "
+        '{"entities": [{"text": "...", "type": "PERSON|ORG|LOCATION|DATE|..."}]}. '
+        "No markdown, no preamble."
     ),
     "sentiment_classification": (
-        "You are a Sentiment Analysis assistant. Classify the sentiment label of the input text (e.g. positive, negative, or neutral, or as specified). "
-        "You MUST provide two things: first, the classification label, and second, a brief, one-sentence justification explaining your choice. "
-        "Answer only with the label and justification. No preamble or explanation."
+        "Classify sentiment (positive/negative/neutral/mixed). "
+        "Give the label plus one brief justification sentence. No preamble."
     ),
     "summarization": (
-        "You are a text Summarization assistant. Summarize the text, strictly respecting any sentence or word length constraints. "
-        "Answer only with the summary. Do not repeat the prompt. No introduction, no explanations."
+        "Summarize the text. Respect any length limits in the prompt. "
+        "Output the summary only."
     ),
     "factual_knowledge": (
-        "You are a Factual Knowledge assistant. Provide a direct, concise, and accurate answer to the question. "
-        "Answer only. No introduction, no explanations, no preamble."
+        "Answer the question directly and concisely. No preamble."
     ),
     "math_reasoning": (
-        "You are a Math Reasoning assistant. Solve the math problem step by step but end with a clear statement of the final answer on a new line, e.g. 'Answer: <value>'. "
-        "Show only the necessary reasoning steps and the final answer."
+        "Solve the math problem. Show minimal steps, end with 'Answer: <value>' on its own line."
     ),
     "logical_reasoning": (
-        "You are a Logical Reasoning assistant. Solve the logic puzzle step by step but end with a clear statement of the final answer on a new line, e.g. 'Answer: <value>'. "
-        "Show only the necessary reasoning steps and the final answer."
+        "Solve the logic puzzle. Show minimal steps, end with 'Answer: <value>' on its own line."
     ),
     "code_generation": (
-        "You are an expert software developer. Write clean, complete, and functional code for the request. "
-        "Wrap your code inside a markdown code block (using triple backticks). "
-        "Output the code block only. No explanation, no description, no preamble."
+        "Write complete functional code in a single markdown code block. No explanation."
     ),
     "code_debugging": (
-        "You are an expert debugger. Fix all issues and bugs in the provided code snippet. "
-        "Wrap the corrected code inside a markdown code block (using triple backticks). "
-        "Output the code block only. Do not repeat the original buggy snippet unchanged. No explanation, no preamble."
-    )
+        "Fix the buggy code. Output corrected code in a markdown code block only."
+    ),
 }
 
 def get_max_tokens(category: str, prompt: str) -> int:
@@ -53,23 +44,23 @@ def get_max_tokens(category: str, prompt: str) -> int:
     Returns appropriate max_tokens constraint based on category and prompt constraints.
     """
     if category == "named_entity_recognition":
-        return 80
+        return 65
     elif category == "sentiment_classification":
-        return 80
+        return 55
     elif category == "summarization":
         # Extract word count limits if any
         word_limit_match = re.search(r"(\d+)\s*words?", prompt.lower())
         if word_limit_match:
             limit = int(word_limit_match.group(1))
-            return max(50, limit * 2 + 10)  # rough token conversion
-        return 200
+            return max(40, limit * 2 + 8)  # rough token conversion
+        return 120
     elif category == "factual_knowledge":
-        return 150
+        return 80
     elif category in ["math_reasoning", "logical_reasoning"]:
-        return 400
+        return 220
     elif category in ["code_generation", "code_debugging"]:
-        return 500
-    return 150
+        return 380
+    return 100
 
 def get_emergency_fallback(category: str, prompt: str) -> str:
     """
@@ -268,7 +259,7 @@ class FireworksClient:
         
         messages = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": prompt + "\n\nAnswer only. No explanation, no chain-of-thought, no preamble, no restating the question."}
+            {"role": "user", "content": prompt + "\n\nAnswer only."}
         ]
         
         attempts = 5
