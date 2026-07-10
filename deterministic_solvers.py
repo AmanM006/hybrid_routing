@@ -340,7 +340,12 @@ _KNOWN_ORGS = {
 _KNOWN_PRODUCTS = {"iphone", "android", "windows", "macos", "linux", "ios",
                    "chatgpt", "gpt", "gemini", "pixel", "galaxy", "kindle"}
 
-_ORG_SUFFIXES = r"(?:Inc\.?|Corp\.?|Ltd\.?|LLC|Co\.?|Group|Foundation|Institute|University|College|School|Hospital|Bank|Trust|Fund|Labs?|Technologies|Tech|Systems|Services|Partners|Associates|International|Global)"
+_KNOWN_EVENTS = {
+    "nobel peace prize", "nobel prize", "wimbledon", "olympics",
+    "world cup", "london marathon", "paris fashion week",
+}
+
+_ORG_SUFFIXES = r"(?:Inc\.?|Corp\.?|Ltd\.?|LLC|Co\.?|Group|Foundation|Institute|University|College|School|Hospital|Clinic|Bank|Trust|Fund|Labs?|Technologies|Tech|Systems|Services|Partners|Associates|International|Global)"
 
 # Prepositions that introduce locations
 _LOC_PREPS = r"(?:in|at|from|near|to|of)\s+"
@@ -360,15 +365,26 @@ _KNOWN_LOCATIONS = {
     "california", "texas", "florida", "new york", "london", "paris",
     "berlin", "oslo", "tokyo", "beijing", "sydney", "toronto", "dubai",
     "hawthorne", "palo alto", "cupertino", "seattle", "chicago", "boston",
+    "washington", "mountain view", "rochester", "united states",
 }
 
 
 def _extract_dates(text: str):
     """Extract dates: month+year, year alone, or full dates."""
     dates = []
+    # "March 3, 2024" / "March 3 2024" (before month+year so the
+    # shorter substring is not emitted separately).
+    for m in re.finditer(
+        rf"\b({_MONTHS})\s+\d{{1,2}}(?:st|nd|rd|th)?(?:,\s*|\s+)\d{{4}}\b",
+        text,
+        re.IGNORECASE,
+    ):
+        dates.append(m.group(0).strip())
     # "January 2007", "Jan 2007"
     for m in re.finditer(rf"\b({_MONTHS})\s+(\d{{4}})\b", text, re.IGNORECASE):
-        dates.append(m.group(0).strip())
+        candidate = m.group(0).strip()
+        if not any(candidate.lower() in d.lower() for d in dates):
+            dates.append(candidate)
     # Standalone 4-digit years in a date context
     for m in re.finditer(r"\bin\s+(\d{4})\b", text, re.IGNORECASE):
         year = m.group(1)
@@ -426,16 +442,19 @@ def _extract_ner_source_text(prompt: str) -> str:
   task is parsed from its actual content, not a shared template prefix.
     """
     p = prompt.strip()
-    m = re.search(
-        r"(?:\bextract\b[^:]*?\bentities?\b|\bentities?\b)\s*:\s*(.+)",
-        p,
-        re.IGNORECASE | re.DOTALL,
-    )
+    # Prefer the final colon-delimited payload. This covers conversational
+    # instructions such as "From this blurb, pull out ...: <source>".
+    m = re.search(r":\s*([^:]+)$", p, re.IGNORECASE | re.DOTALL)
     if m:
         text = m.group(1).strip()
     else:
-        from_m = re.search(r"from\s*:\s*(.+)$", p, re.IGNORECASE | re.DOTALL)
-        text = from_m.group(1).strip() if from_m else p
+        # "Can you extract ... note? Dr. Anya ..." style.
+        question_payload = re.search(
+            r"\b(?:extract|identify|list|pull out)\b[^?]{0,180}\?\s*(.+)$",
+            p,
+            re.IGNORECASE | re.DOTALL,
+        )
+        text = question_payload.group(1).strip() if question_payload else p
     text = re.sub(r"\s*Index\s+\d+\.?\s*$", "", text, flags=re.IGNORECASE).strip()
     return _repair_mojibake(text)
 
@@ -520,6 +539,20 @@ def _solve_ner_deterministically(prompt: str):
         if word.lower() in _KNOWN_PRODUCTS:
             products.append(word)
 
+    events = []
+    source_lower = source_text.lower()
+    for event in _KNOWN_EVENTS:
+        for m in re.finditer(rf"\b{re.escape(event)}\b", source_lower):
+            events.append(source_text[m.start():m.end()])
+
+    # Correct common regex ambiguities before assembling output.
+    known_location_lower = {loc.lower() for loc in _KNOWN_LOCATIONS}
+    event_lower = {event.lower() for event in events}
+    persons = [
+        p for p in persons
+        if p.lower() not in known_location_lower and p.lower() not in event_lower
+    ]
+
     # Remove person candidates already captured as orgs
     org_lower = {o.lower() for o in orgs}
     persons = [p for p in persons if p.lower() not in org_lower]
@@ -546,9 +579,33 @@ def _solve_ner_deterministically(prompt: str):
         entities.append({"text": d, "type": "DATE"})
     for pr in products:
         entities.append({"text": pr, "type": "PRODUCT"})
+    for event in events:
+        entities.append({"text": event, "type": "EVENT"})
 
     if len(entities) < 2:
         logger.info(f"[DETERM-NER] Too few entities ({len(entities)}) — falling through to LLM.")
+        return None
+
+    # Completeness guard: deterministic extraction must never return a
+    # structurally valid but partial answer. If a capitalized source token is
+    # absent from every extracted entity, let the remote NER model handle it.
+    represented = " ".join(e["text"] for e in entities).lower()
+    ignored = {
+        "the", "after", "from", "can", "dr", "ceo", "ner", "task",
+        "index", "q", "extract", "identify", "list", "find",
+    }
+    unexplained = []
+    for token in re.findall(r"\b[A-ZÀ-ÖØ-Þ][A-Za-zÀ-ÖØ-öø-ÿ'-]{2,}\b", source_text):
+        low = token.lower()
+        if low in ignored or _MONTH_RE.match(token):
+            continue
+        if low not in represented:
+            unexplained.append(token)
+    if unexplained:
+        logger.info(
+            f"[DETERM-NER] Unexplained capitalized candidates {unexplained} — "
+            "falling through to remote NER."
+        )
         return None
 
     # If prompt says "works at X" but we missed X, do not return a partial answer

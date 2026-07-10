@@ -10,8 +10,9 @@ os.environ["FIREWORKS_BASE_URL"] = "https://api.fireworks.ai/inference/v1"
 os.environ["ALLOWED_MODELS"] = "accounts/fireworks/models/llama-v3p1-8b-instruct,accounts/fireworks/models/llama-v3p1-70b-instruct,accounts/fireworks/models/qwen2p5-coder-32b-instruct"
 
 from classifier import classify_prompt
-from validators import validate_category_output
-from client import get_emergency_fallback
+from validators import validate_category_output, coerce_ner_output
+from client import FireworksClient, get_emergency_fallback
+from deterministic_solvers import solve_ner_deterministically
 from main import classify_model_roles
 import main
 
@@ -132,9 +133,20 @@ class TestGeneralPurposeAgent(unittest.IsolatedAsyncioTestCase):
             "What is -15 + 27?",
             "What is the average of 12, 18, and 30?",
             "Hey, if someone bought twelve apples and gave away four, how many would they have left?",
+            "Tom has 3 apples, buys 12 more, then eats 7. How many apples does he have?",
+            "There are 17 students and each needs 4 handouts. How many handouts should I print?",
         ]
         for prompt in math_prompts:
             self.assertEqual(await classify_prompt(prompt), "math_reasoning")
+
+    async def test_conversational_ner_routing(self):
+        prompts = [
+            "From this blurb, pull out the people, companies, and places: Sundar Pichai leads Google.",
+            "Can you extract named entities from this customer note? Dr. Anya Sharma visited Mayo Clinic.",
+            "List the people and companies in: Satya Nadella leads Microsoft.",
+        ]
+        for prompt in prompts:
+            self.assertEqual(await classify_prompt(prompt), "named_entity_recognition")
 
     async def test_edge_cases_classification(self):
         """
@@ -195,6 +207,43 @@ class TestGeneralPurposeAgent(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(validate_category_output("sentiment_classification", prompt_with_just, "positive because it has excellent features"))
         # Now rejected to force cheap model to produce justification
         self.assertFalse(validate_category_output("sentiment_classification", prompt_with_just, "positive"))
+
+        client = FireworksClient("fake", "https://example.invalid")
+        normalized = client._scrub_cot(
+            "Mixed — the design is excellent and the battery is poor.",
+            "sentiment_classification",
+        )
+        self.assertIn("because", normalized.lower())
+        self.assertTrue(validate_category_output("sentiment_classification", prompt, normalized))
+
+    def test_ner_partial_answers_fall_through_and_heading_repair(self):
+        # Missing event/product/date candidates must not be accepted as a
+        # confident deterministic extraction.
+        event_result = solve_ner_deterministically(
+            "NER task — list entities with types from: Serena Williams won Wimbledon in London in 2012."
+        )
+        self.assertIsNotNone(event_result)
+        event_entities = json.loads(event_result)["entities"]
+        self.assertIn(
+            {"text": "Wimbledon", "type": "EVENT"},
+            event_entities,
+        )
+        self.assertIsNone(solve_ner_deterministically(
+            "Can you extract named entities from this customer note? "
+            "Dr. Anya Sharma at Mayo Clinic in Rochester prescribed Lisinopril on March 3, 2024."
+        ))
+
+        repaired, ok = coerce_ner_output(
+            "**People:** Sundar Pichai\n"
+            "**Companies:** Google, Alphabet\n"
+            "**Places:** Mountain View"
+        )
+        self.assertTrue(ok)
+        data = json.loads(repaired)
+        self.assertEqual(
+            {e["text"] for e in data["entities"]},
+            {"Sundar Pichai", "Google", "Alphabet", "Mountain View"},
+        )
 
 
     def test_summarization_validator(self):

@@ -636,7 +636,7 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
                         )
                         if raw and len(raw) > len(best_raw):
                             best_raw = raw
-                        coerced, ok = coerce_ner_output(raw)
+                        coerced, ok = coerce_ner_output(raw, prompt)
                         if ok:
                             answer = coerced
                             validation_pass = True
@@ -646,15 +646,16 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
                         logger.warning(f"Task {task_id}: NER model {model} failed: {e}")
 
                 if not validation_pass and best_raw:
-                    coerced, ok = coerce_ner_output(best_raw)
+                    coerced, ok = coerce_ner_output(best_raw, prompt)
                     if ok:
                         answer = coerced
                         validation_pass = True
                         logger.info(f"Task {task_id}: NER repaired best remote attempt.")
                     else:
-                        answer = best_raw.strip()
+                        # Never emit non-JSON for a JSON-contract category.
+                        answer = get_emergency_fallback(category, prompt)
                         logger.warning(
-                            f"Task {task_id}: NER using best-effort raw remote answer (repair failed)."
+                            f"Task {task_id}: NER repair failed; returning schema-safe fallback."
                         )
 
                 if not validation_pass and not best_raw:

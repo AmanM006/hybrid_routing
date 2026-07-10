@@ -43,6 +43,26 @@ def repair_ner_output(output: str) -> str | None:
     text = output.strip()
     entities = []
 
+    # "**People:** Sundar Pichai\n**Companies:** Google, Alphabet" and
+    # equivalent plain headings. Some instruction models ignore JSON mode but
+    # still provide a complete, typed extraction in this predictable format.
+    heading_types = {
+        "people": "PERSON", "persons": "PERSON",
+        "companies": "ORG", "organizations": "ORG", "organisations": "ORG",
+        "places": "LOCATION", "locations": "LOCATION",
+        "dates": "DATE", "events": "EVENT", "products": "PRODUCT",
+    }
+    for m in re.finditer(
+        r"(?im)^\s*(?:\*\*)?(people|persons|companies|organizations|organisations|"
+        r"places|locations|dates|events|products)(?:\*\*)?\s*:\s*(.+?)\s*$",
+        text,
+    ):
+        etype = heading_types[m.group(1).lower()]
+        for value in re.split(r"\s*,\s*|\s*;\s*", m.group(2)):
+            value = value.strip().strip("*").strip()
+            if value:
+                entities.append({"text": value, "type": etype})
+
     # "- François Mitterrand: PERSON" / "- Name : TYPE"
     for m in re.finditer(
         rf"(?m)^[-*•]\s*(.+?)\s*[:：]\s*([A-Za-z][A-Za-z_/]*)\s*$",
@@ -84,15 +104,15 @@ def repair_ner_output(output: str) -> str | None:
     return None
 
 
-def coerce_ner_output(output: str) -> tuple[str | None, bool]:
+def coerce_ner_output(output: str, prompt: str = "") -> tuple[str | None, bool]:
     """Return (normalized_json_or_best_text, passes_validation)."""
     if not output or not output.strip():
         return None, False
     repaired = repair_ner_output(output)
-    if repaired and validate_ner(repaired):
+    if repaired and validate_ner(repaired, prompt):
         return repaired, True
     extracted = extract_ner_json(output)
-    if extracted and validate_ner(extracted):
+    if extracted and validate_ner(extracted, prompt):
         return extracted, True
     return repaired, False
 
@@ -254,8 +274,13 @@ def validate_summarization(prompt: str, output: str) -> bool:
         limit = int(sentence_limit_match.group(1))
         # Simple sentence splitter
         sentences = [s for s in re.split(r"[.!?]\s+", output_clean) if s.strip()]
-        # Allow buffer of +2 for sentence counts to avoid rejecting slightly-long but correct answers
-        if len(sentences) > limit + 2:
+        exact_requested = bool(re.search(rf"\bexactly\s+{limit}\s+sentences?\b", prompt_lower))
+        if exact_requested and len(sentences) != limit:
+            logger.warning(
+                f"Summarization Validation Failed: Expected exactly {limit} sentences, got {len(sentences)}."
+            )
+            return False
+        if not exact_requested and len(sentences) > limit:
             logger.warning(f"Summarization Validation Failed: Sentence count {len(sentences)} exceeds limit {limit}.")
             return False
             

@@ -45,7 +45,9 @@ SUMMARIZE_KEYWORDS = re.compile(
     re.IGNORECASE
 )
 NER_KEYWORDS = re.compile(
-    r"\b(extract entities|ner|named entities|extract names|extract places|extract organizations|extract dates|identify people|locations|dates|entities)\b", 
+    r"\b(extract entities|ner|named entities|extract names|extract places|extract organizations|extract dates|"
+    r"identify people|identify entities|identify names|pull out (?:the )?(?:people|names|entities)|"
+    r"list (?:the )?(?:people|companies|places|entities)|locations|dates|entities)\b",
     re.IGNORECASE
 )
 FACTUAL_KEYWORDS = re.compile(
@@ -100,6 +102,18 @@ async def classify_prompt(prompt: str, local_llm_callable=None) -> str:
         re.search(r"\d+%", prompt_lower) or
         re.search(r"\b\d+\b.*?\bper\b", prompt_lower) or
         re.search(r"\b(how long|how many|how much|how far|how fast)\b.*?\b\d+\b", prompt_lower) or
+        # Conversational multi-step word problems may put numbers before the
+        # final "how many" question.
+        (
+            re.search(r"\bhow many\b", prompt_lower)
+            and len(re.findall(r"\b\d+(?:\.\d+)?\b", prompt_lower)) >= 2
+            and re.search(
+                r"\b(each|every|per|total|left|remain|week|day|mile|student|"
+                r"apple|handout|buy|buys|bought|eat|eats|sell|sold|drive|trip|"
+                r"cost|pay|need)\b",
+                prompt_lower,
+            )
+        ) or
         (re.search(r"\b(average|mean)\b", prompt_lower) and re.search(r"\d", prompt)) or
         re.search(r"\bwhat is\s+[-\d].*?[+\-*/×÷]", prompt_lower) or
         re.search(r"\bwhat is\s+.*?\d+\s*[+\-*/×÷]\s*[-\d]", prompt_lower) or
@@ -197,7 +211,10 @@ async def classify_prompt(prompt: str, local_llm_callable=None) -> str:
     # 7. NER — before summarization to handle multi-intent ("extract entities AND summarize")
     # Prefer NER if the extraction request appears first in the text
     ner_idx = min(
-        (prompt_lower.find(kw) for kw in ["extract entities", "extract names", "named entities", "identify entities"]
+        (prompt_lower.find(kw) for kw in [
+            "extract entities", "extract names", "named entities", "identify entities",
+            "pull out the people", "pull out people", "list the people",
+        ]
          if prompt_lower.find(kw) != -1),
         default=-1
     )

@@ -1,0 +1,36 @@
+[
+  {"task_id": "fd-m01", "prompt": "Hey quick one — if I buy a $95 jacket and the tag says 20% off at checkout, what do I actually pay?", "category": "math_reasoning", "gold": "76"},
+  {"task_id": "fd-m02", "prompt": "My commute is 42 miles each way, five days a week. How many miles do I drive for work in one week?", "category": "math_reasoning", "gold": "420"},
+  {"task_id": "fd-m03", "prompt": "A recipe calls for 2/3 cup of sugar but I want to triple the batch. How many cups of sugar total?", "category": "math_reasoning", "gold": "2"},
+  {"task_id": "fd-m04", "prompt": "There are 17 students and each needs 4 handouts. How many handouts should I print?", "category": "math_reasoning", "gold": "68"},
+
+  {"task_id": "fd-n01", "prompt": "From this blurb, pull out the people, companies, and places: After leaving Stanford, Sundar Pichai became CEO of Google in Mountain View while Alphabet reported earnings.", "category": "named_entity_recognition", "gold": "Sundar Pichai, Google, Mountain View, Alphabet"},
+  {"task_id": "fd-n02", "prompt": "NER task — list entities with types from: Serena Williams won Wimbledon in London in 2012 representing the United States.", "category": "named_entity_recognition", "gold": "Serena Williams, Wimbledon, London, United States, 2012"},
+  {"task_id": "fd-n03", "prompt": "Can you extract named entities from this customer note? Dr. Anya Sharma at Mayo Clinic in Rochester prescribed Lisinopril on March 3, 2024.", "category": "named_entity_recognition", "gold": "Anya Sharma, Mayo Clinic, Rochester, Lisinopril, March 3 2024"},
+  {"task_id": "fd-n04", "prompt": "Identify entities: The WHO conference in Geneva was opened by Tedros Adhanom in May 2023.", "category": "named_entity_recognition", "gold": "WHO, Geneva, Tedros Adhanom, May 2023"},
+
+  {"task_id": "fd-s01", "prompt": "What's the overall sentiment here? 'Food was incredible and service was warm, but we waited 45 minutes and the table was sticky.'", "category": "sentiment_classification", "gold": "mixed/negative with because"},
+  {"task_id": "fd-s02", "prompt": "Sentiment check on this Slack message: 'Shipped on time, works perfectly, already recommending it to the team.'", "category": "sentiment_classification", "gold": "positive with because"},
+  {"task_id": "fd-s03", "prompt": "Classify sentiment: 'It is what it is — neither impressed nor upset after trying it once.'", "category": "sentiment_classification", "gold": "neutral with because"},
+  {"task_id": "fd-s04", "prompt": "How would you label the tone? 'Absolutely love the design; hate that the battery dies by noon every day.'", "category": "sentiment_classification", "gold": "mixed with because"},
+
+  {"task_id": "fd-f01", "prompt": "Random trivia — what's the chemical symbol for gold?", "category": "factual_knowledge", "gold": "Au"},
+  {"task_id": "fd-f02", "prompt": "Which planet is known as the Red Planet?", "category": "factual_knowledge", "gold": "Mars"},
+  {"task_id": "fd-f03", "prompt": "In networking, what does DNS stand for?", "category": "factual_knowledge", "gold": "Domain Name System"},
+  {"task_id": "fd-f04", "prompt": "Who wrote the novel '1984'?", "category": "factual_knowledge", "gold": "George Orwell"},
+
+  {"task_id": "fd-sum01", "prompt": "Give me a one-sentence summary (max 15 words) of: The city council approved a $2M bike lane expansion after months of public hearings and a narrow 5-4 vote.", "category": "summarization", "gold": "≤15 words, mentions bike lane approval"},
+  {"task_id": "fd-sum02", "prompt": "TL;DR in exactly 2 sentences: Researchers found that short naps under 30 minutes improved memory recall in adults, but longer naps caused grogginess that lasted an hour.", "category": "summarization", "gold": "2 sentences about naps/memory"},
+  {"task_id": "fd-sum03", "prompt": "Summarize for a busy manager (under 20 words): Our Q3 revenue rose 8% year-over-year driven by enterprise subscriptions, while consumer churn ticked up slightly.", "category": "summarization", "gold": "≤20 words, revenue + subscriptions"},
+  {"task_id": "fd-sum04", "prompt": "Condense this email thread gist in one line: Customer reported login failures; engineering traced it to an expired OAuth certificate; fix deployed at 14:00 UTC.", "category": "summarization", "gold": "login/OAuth cert fix deployed"},
+
+  {"task_id": "fd-l01", "prompt": "Logic puzzle: Mia, Noah, and Priya each drink one of coffee, tea, or juice. Mia does not drink juice. Noah drinks tea. What does Priya drink?", "category": "logical_reasoning", "gold": "juice"},
+  {"task_id": "fd-l02", "prompt": "If all bloops are razzies, and some razzies are zots, can we conclude that some bloops are definitely zots? Answer yes or no.", "category": "logical_reasoning", "gold": "no"},
+  {"task_id": "fd-l03", "prompt": "You flip a fair coin three times and get heads each time. What is the probability the next flip is heads? Reply with a fraction.", "category": "logical_reasoning", "gold": "1/2"},
+  {"task_id": "fd-l04", "prompt": "Three switches control one bulb in another room. You may inspect the bulb only once. What is the minimum number of switch toggles needed to identify which switch controls the bulb?", "category": "logical_reasoning", "gold": "1 toggle sequence / classic puzzle"},
+
+  {"task_id": "fd-c01", "prompt": "Write a Python function `celsius_to_fahrenheit(c)` that converts Celsius to Fahrenheit.", "category": "code_generation", "gold": "valid python with formula"},
+  {"task_id": "fd-c02", "prompt": "Implement JavaScript: function unique(arr) returning array with duplicates removed, preserve order.", "category": "code_generation", "gold": "valid JS unique filter/set"},
+  {"task_id": "fd-d01", "prompt": "This Python code should sum a list but returns 0 always:\ndef total(nums):\n    s = 0\n    for n in nums:\n        s = n\n    return s\nFix the bug.", "category": "code_debugging", "gold": "s += n or s = s + n"},
+  {"task_id": "fd-d02", "prompt": "Bug in binary search — misses when array is empty:\ndef bsearch(a, x):\n    lo, hi = 0, len(a)\n    while lo < hi:\n        mid = (lo+hi)//2\n        if a[mid] < x: lo = mid+1\n        else: hi = mid\n    return lo\nHandle empty input safely.", "category": "code_debugging", "gold": "return -1 or handle len(a)==0"}
+]
