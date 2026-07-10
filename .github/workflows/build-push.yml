@@ -22,6 +22,7 @@ jobs:
       - run: python check_docker_copy.py
       - run: python test_solvers_edge.py
       - run: python test_solvers.py
+      - run: python test_international_ner.py
       - run: python test_resilience.py
       - run: python test_adversarial.py
       - run: python test_agent.py

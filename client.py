@@ -44,7 +44,7 @@ def get_max_tokens(category: str, prompt: str) -> int:
     Returns appropriate max_tokens constraint based on category and prompt constraints.
     """
     if category == "named_entity_recognition":
-        return 65
+        return 120
     elif category == "sentiment_classification":
         return 55
     elif category == "summarization":
@@ -70,32 +70,10 @@ def get_emergency_fallback(category: str, prompt: str) -> str:
     prompt_clean = prompt.strip()
     
     if category == "named_entity_recognition":
-        # Find capitalized words
-        words = re.findall(r"\b([A-Z][a-z]+)\b", prompt_clean)
-        entities = []
-        for w in sorted(list(set(words))):
-            # skip common sentence-starting helper words and generic prompts
-            if w.lower() in ["extract", "identify", "show", "list", "find", "ner", "entities", "the", "this", "please", "named"]:
-                continue
-            
-            # Check context cues (titles -> PERSON, suffix -> ORGANIZATION, else MISC)
-            pattern_person = rf"\b(?:Mr\.|Ms\.|Mrs\.|Dr\.|CEO|President|founder|colleague|colleague\s+)\s*{w}\b"
-            pattern_org = rf"\b{w}\s*(?:Inc\b|Corp\b|Ltd\b|LLC\b|Group\b|Co\b|Labs\b)"
-            
-            if re.search(pattern_person, prompt_clean):
-                entities.append({"text": w, "type": "PERSON"})
-            elif re.search(pattern_org, prompt_clean) or w.lower() in ["google", "microsoft", "apple", "amazon", "facebook", "meta"]:
-                entities.append({"text": w, "type": "ORGANIZATION"})
-            else:
-                entities.append({"text": w, "type": "MISC"})
-                
-        # Bound entities list to maximum of 3
-        entities = entities[:3]
-        if not entities:
-            entities = [{"text": "UnknownEntity", "type": "MISC"}]
-            
-        return json.dumps({"entities": entities})
-        
+        # No heuristic name-splitting — returns empty entities only when API produced nothing.
+        # main.py prefers the best raw remote answer over this fallback.
+        return json.dumps({"entities": []})
+
     elif category == "sentiment_classification":
         # Always include a justification to pass the 4-word validator
         prompt_lower = prompt_clean.lower()
@@ -190,6 +168,13 @@ class FireworksClient:
                 return "```python\n" + code_block_match.group(1).rstrip() + "\n```"
             return text
 
+        # For NER: prefer embedded JSON block over line-scrubbing (preserves Unicode names)
+        if category == "named_entity_recognition":
+            start = text.find("{")
+            end = text.rfind("}")
+            if start != -1 and end > start:
+                return text[start : end + 1].strip()
+
         lines = text.strip().splitlines()
         skip_prefixes = (
             "the user wants", "the user asks", "the user said", "the user's question",
@@ -280,14 +265,28 @@ class FireworksClient:
                     kwargs["extra_body"] = {"reasoning_effort": "none"}
                     
                 try:
-                    print(f"FIREWORKS_PAYLOAD: model={kwargs.get('model')} | extra_body={kwargs.get('extra_body')} | messages={kwargs.get('messages')}", flush=True)
+                    payload_msg = (
+                        f"FIREWORKS_PAYLOAD: model={kwargs.get('model')} | "
+                        f"extra_body={kwargs.get('extra_body')} | messages={kwargs.get('messages')}"
+                    )
+                    try:
+                        print(payload_msg, flush=True)
+                    except UnicodeEncodeError:
+                        print(payload_msg.encode("ascii", errors="replace").decode("ascii"), flush=True)
                     response = await self.client.chat.completions.create(**kwargs)
                 except Exception as e:
                     # If reasoning_effort is not supported by the endpoint/SDK version, fall back
                     if "extra_body" in kwargs and any(err in str(e).lower() for err in ["reasoning_effort", "invalid", "unexpected", "400"]):
                         logger.warning(f"API call with reasoning_effort failed: {e}. Retrying without reasoning_effort parameter...")
                         del kwargs["extra_body"]
-                        print(f"FIREWORKS_PAYLOAD (RETRY): model={kwargs.get('model')} | extra_body={kwargs.get('extra_body')} | messages={kwargs.get('messages')}", flush=True)
+                        retry_msg = (
+                            f"FIREWORKS_PAYLOAD (RETRY): model={kwargs.get('model')} | "
+                            f"extra_body={kwargs.get('extra_body')} | messages={kwargs.get('messages')}"
+                        )
+                        try:
+                            print(retry_msg, flush=True)
+                        except UnicodeEncodeError:
+                            print(retry_msg.encode("ascii", errors="replace").decode("ascii"), flush=True)
                         response = await self.client.chat.completions.create(**kwargs)
                     else:
                         raise e

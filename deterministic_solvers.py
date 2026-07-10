@@ -187,9 +187,20 @@ def _solve_math_deterministically(prompt: str):
 
     # --- 11. Average of a list of numbers -------------------------------------
     # "What is the average of 10, 20, and 30?"
-    # "Find the mean of 5, 15, 25, 35."
+    # Only use digits from the explicit list after "of" — ignore harness "Index N" noise.
     if re.search(r"\b(average|mean)\b", pl):
-        nums = re.findall(r"(\d+(?:\.\d+)?)", p)
+        work = re.sub(r"\s*Index\s+(?:number\s+)?\d+\.?\s*$", "", p, flags=re.IGNORECASE).strip()
+        list_m = re.search(r"\b(?:average|mean)\s+of\s+(.+?)(?:\?|$)", work, re.IGNORECASE)
+        if list_m:
+            list_text = re.sub(
+                r"\s*Index\s+(?:number\s+)?\d+\.?\s*",
+                "",
+                list_m.group(1),
+                flags=re.IGNORECASE,
+            )
+            nums = re.findall(r"(\d+(?:\.\d+)?)", list_text)
+        else:
+            nums = re.findall(r"(\d+(?:\.\d+)?)", work)
         if len(nums) >= 2:
             values = [float(n) for n in nums]
             result = sum(values) / len(values)
@@ -294,17 +305,19 @@ def _extract_dates(text: str):
         year = m.group(1)
         if year not in [d for d in dates]:
             dates.append(year)
+    for m in re.finditer(r"\bduring\s+(\d{4})\b", text, re.IGNORECASE):
+        year = m.group(1)
+        if year not in dates:
+            dates.append(year)
     return list(dict.fromkeys(dates))  # dedupe, preserve order
 
 
 def _extract_persons(text: str):
-    """Extract PERSON entities: two+ adjacent Title-Case words."""
-    # Avoid extracting organisation names again
+    """Extract PERSON entities: two+ adjacent Title-Case words (incl. accented Latin)."""
     persons = []
-    # Pattern: 2 or 3 adjacent title-cased words not followed by org suffix
     for m in re.finditer(
-        r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})\b",
-        text
+        rf"\b([A-ZÀ-ÖØ-Þ][a-zà-öø-ÿ]+(?:\s+[A-ZÀ-ÖØ-Þ][a-zà-öø-ÿ]+){{1,2}})\b",
+        text,
     ):
         candidate = m.group(1).strip()
         # Skip known orgs or products
@@ -327,6 +340,16 @@ def _extract_persons(text: str):
     return list(dict.fromkeys(persons))
 
 
+def _repair_mojibake(text: str) -> str:
+    """Fix UTF-8 misread as Latin-1 (e.g. FranÃ§ois → François)."""
+    if not text or not re.search(r"[ÃÂâ€]", text):
+        return text
+    try:
+        return text.encode("latin-1").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return text
+
+
 def _extract_ner_source_text(prompt: str) -> str:
     """
     Isolate the sentence to tag from an extraction prompt.
@@ -345,7 +368,7 @@ def _extract_ner_source_text(prompt: str) -> str:
         from_m = re.search(r"from\s*:\s*(.+)$", p, re.IGNORECASE | re.DOTALL)
         text = from_m.group(1).strip() if from_m else p
     text = re.sub(r"\s*Index\s+\d+\.?\s*$", "", text, flags=re.IGNORECASE).strip()
-    return text
+    return _repair_mojibake(text)
 
 
 def _extract_orgs(text: str):
@@ -377,7 +400,7 @@ def _extract_locations(text: str):
     locations = []
     # Preposition-triggered locations: "in Oslo", "in California"
     for m in re.finditer(
-        rf"{_LOC_PREPS}([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b",
+        rf"{_LOC_PREPS}([A-ZÀ-ÖØ-Þ][a-zà-öø-ÿ]+(?:\s+[A-ZÀ-ÖØ-Þ][a-zà-öø-ÿ]+)?)\b",
         text
     ):
         candidate = m.group(1).strip()

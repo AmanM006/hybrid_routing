@@ -142,8 +142,8 @@ async def classify_prompt(prompt: str, local_llm_callable=None) -> str:
     ner_score = len(NER_KEYWORDS.findall(prompt_lower))
     
     # Safety bias: Check hard categories first
-    # 1. Code Debugging: has code block or code words AND debugging words
-    if (has_code_block or code_score > 0) and debug_score > 0:
+    # 1. Code Debugging: code present + debugging words (incl. bare def + Bug/Fix prompts)
+    if (has_code_block or code_score > 0 or "def " in prompt) and debug_score > 0:
         return "code_debugging"
         
     # 2. Code Generation: contains code keywords or is asking to write a program/function/class

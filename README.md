@@ -97,31 +97,31 @@ docker run \
 A GitHub Actions workflow is pre-configured in `.github/workflows/build-push.yml`. When you push to your repository, it automatically builds the AMD64 container and publishes it to the GitHub Container Registry:
 
 ```bash
-ghcr.io/amanm006/hybrid_routing-v1:v20
+ghcr.io/amanm006/hybrid_routing-v1:v22
 ```
 
 ### Hackathon submission (exact image reference)
 
-Each release gets **one** canonical version tag (`v20`, `v21`, …) plus `latest`. No dot-padded or zero-padded aliases.
+Each release gets **one** canonical version tag (`v22`, `v23`, …) plus `latest`. No dot-padded or zero-padded aliases.
 
 Use this **exact** string in the submission form (no `https://`, must include tag):
 
 ```
-ghcr.io/amanm006/hybrid_routing-v1:v20
+ghcr.io/amanm006/hybrid_routing-v1:v22
 ```
 
-**Valid tags:** `v20` (canonical), `latest` (always points to newest release)
+**Valid tags:** `v22` (canonical), `latest` (always points to newest release)
 
 **Invalid (will cause PULL_ERROR):**
-- `ghcr.io/amanm006/hybrid-routing-v1:v20` (hyphen — package uses underscore)
-- `ghcr.io/amanm006/hybrid_routing-v1:v.020` or `v020` (aliases are not published)
+- `ghcr.io/amanm006/hybrid-routing-v1:v22` (hyphen — package uses underscore)
+- `ghcr.io/amanm006/hybrid_routing-v1:v.022` or `v022` (aliases are not published)
 - `ghcr.io/amanm006/hybrid_routing-v1` (missing tag)
 - `https://ghcr.io/...` (no URL prefix)
 
 Verify before submitting:
 ```bash
 docker logout ghcr.io
-docker pull ghcr.io/amanm006/hybrid_routing-v1:v20
+docker pull ghcr.io/amanm006/hybrid_routing-v1:v22
 ```
 
 Package must be **Public**: GitHub → Packages → `hybrid_routing-v1` → Package settings → Change visibility.

@@ -23,7 +23,7 @@ logger = logging.getLogger("agent")
 
 # Import system modules
 from classifier import classify_prompt
-from validators import validate_category_output, validate_ner, verify_math_self_consistency
+from validators import validate_category_output, validate_ner, verify_math_self_consistency, coerce_ner_output
 from client import FireworksClient, get_max_tokens, get_emergency_fallback
 from deterministic_solvers import (
     solve_math_deterministically,
@@ -620,43 +620,52 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
                     answer = get_emergency_fallback(category, prompt)
 
             elif category == "named_entity_recognition":
-                # Accuracy-first: go straight to reasoning model (needs correct JSON schema)
-                if roles.get("reasoning"):
-                    tier_used = "direct-remote"
-                    model_name = roles["reasoning"]
+                best_raw = ""
+                ner_tiers = [
+                    ("direct-remote", roles.get("reasoning"), 14.0),
+                    ("mid-fallback", roles.get("mid"), 12.0),
+                    ("cheap-fallback", roles.get("cheap"), 10.0),
+                    ("code-fallback", roles.get("code"), 12.0),
+                ]
+                seen_models = set()
+                for tier_name, model, timeout in ner_tiers:
+                    if not model or model in seen_models:
+                        continue
+                    seen_models.add(model)
+                    tier_used = tier_name
+                    model_name = model
                     try:
-                        answer = await client.call_api(
-                            model=roles["reasoning"],
+                        raw = await client.call_api(
+                            model=model,
                             category=category,
                             prompt=prompt,
-                            timeout=14.0
+                            timeout=timeout,
                         )
-                        validation_pass = _validate_output(category, prompt, answer)
-                        if validation_pass:
-                            logger.info(f"Task {task_id}: NER reasoning model passed validation.")
+                        if raw and len(raw) > len(best_raw):
+                            best_raw = raw
+                        coerced, ok = coerce_ner_output(raw)
+                        if ok:
+                            answer = coerced
+                            validation_pass = True
+                            logger.info(f"Task {task_id}: NER model {model} passed validation.")
+                            break
                     except Exception as e:
-                        logger.warning(f"Task {task_id}: NER reasoning model failed: {e}. Escalating...")
+                        logger.warning(f"Task {task_id}: NER model {model} failed: {e}")
 
-                # Fallback: mid model
-                if not validation_pass and roles.get("mid"):
-                    tier_used = "mid-fallback"
-                    model_name = roles["mid"]
-                    try:
-                        logger.info(f"Task {task_id}: NER falling back to mid model: {model_name}")
-                        answer = await client.call_api(
-                            model=roles["mid"],
-                            category=category,
-                            prompt=prompt,
-                            timeout=12.0
+                if not validation_pass and best_raw:
+                    coerced, ok = coerce_ner_output(best_raw)
+                    if ok:
+                        answer = coerced
+                        validation_pass = True
+                        logger.info(f"Task {task_id}: NER repaired best remote attempt.")
+                    else:
+                        answer = best_raw.strip()
+                        logger.warning(
+                            f"Task {task_id}: NER using best-effort raw remote answer (repair failed)."
                         )
-                        validation_pass = _validate_output(category, prompt, answer)
-                        if validation_pass:
-                            logger.info(f"Task {task_id}: NER mid model passed validation.")
-                    except Exception as e:
-                        logger.warning(f"Task {task_id}: NER mid model failed: {e}")
 
-                if not validation_pass:
-                    logger.warning(f"Task {task_id}: All models failed for NER. Falling back to emergency placeholder.")
+                if not validation_pass and not best_raw:
+                    logger.warning(f"Task {task_id}: No NER API response — empty entities fallback.")
                     answer = get_emergency_fallback(category, prompt)
 
             else:
@@ -794,7 +803,7 @@ async def main():
         logger.error(f"Input file not found at {input_path}")
         sys.exit(1)
         
-    with open(input_path, "r") as f:
+    with open(input_path, "r", encoding="utf-8") as f:
         tasks = json.load(f)
         
     if not isinstance(tasks, list):

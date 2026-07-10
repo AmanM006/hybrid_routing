@@ -5,6 +5,98 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# Unicode-aware word token for international names/places (François, München, José)
+_U_WORD = r"[\w\u00C0-\u024F\u1E00-\u1EFF]"
+
+
+def extract_ner_json(output: str) -> str | None:
+    """Extract and re-serialize a valid NER JSON object, preserving Unicode."""
+    if not output or not output.strip():
+        return None
+    stripped = re.sub(r"^```(?:json)?\s*", "", output.strip(), flags=re.IGNORECASE)
+    stripped = re.sub(r"\s*```$", "", stripped.strip())
+    start = stripped.find("{")
+    end = stripped.rfind("}")
+    if start == -1 or end == -1 or end < start:
+        return None
+    try:
+        data = json.loads(stripped[start : end + 1])
+        if isinstance(data, dict) and "entities" in data:
+            return json.dumps(data, ensure_ascii=False)
+    except json.JSONDecodeError:
+        pass
+    return None
+
+
+def repair_ner_output(output: str) -> str | None:
+    """
+    Convert model output (JSON, markdown JSON, or bullet-list) into canonical NER JSON.
+    Handles non-ASCII entity text (François, München, etc.).
+    """
+    if not output or not output.strip():
+        return None
+
+    extracted = extract_ner_json(output)
+    if extracted and validate_ner(extracted):
+        return extracted
+
+    text = output.strip()
+    entities = []
+
+    # "- François Mitterrand: PERSON" / "- Name : TYPE"
+    for m in re.finditer(
+        rf"(?m)^[-*•]\s*(.+?)\s*[:：]\s*([A-Za-z][A-Za-z_/]*)\s*$",
+        text,
+    ):
+        entities.append({"text": m.group(1).strip(), "type": m.group(2).strip().upper()})
+
+    # "- François Mitterrand (PERSON)"
+    for m in re.finditer(
+        rf"(?m)^[-*•]\s*(.+?)\s*\(([A-Za-z][A-Za-z_/]*)\)\s*$",
+        text,
+    ):
+        entities.append({"text": m.group(1).strip(), "type": m.group(2).strip().upper()})
+
+    # "Name (person)" inline comma-separated (adv-x01 style fragments)
+    for m in re.finditer(
+        r"([\w\u00C0-\u024F][\w\u00C0-\u024F\s.'-]{0,60}?)\s*\((person|company|location|org|date|misc)\)",
+        text,
+        re.IGNORECASE,
+    ):
+        etype = m.group(2).upper()
+        if etype == "COMPANY":
+            etype = "ORG"
+        if etype == "PERSON":
+            etype = "PERSON"
+        entities.append({"text": m.group(1).strip(), "type": etype})
+
+    if entities:
+        # Deduplicate by text (case-insensitive)
+        seen = set()
+        unique = []
+        for e in entities:
+            key = e["text"].lower()
+            if key not in seen:
+                seen.add(key)
+                unique.append(e)
+        return json.dumps({"entities": unique}, ensure_ascii=False)
+
+    return None
+
+
+def coerce_ner_output(output: str) -> tuple[str | None, bool]:
+    """Return (normalized_json_or_best_text, passes_validation)."""
+    if not output or not output.strip():
+        return None, False
+    repaired = repair_ner_output(output)
+    if repaired and validate_ner(repaired):
+        return repaired, True
+    extracted = extract_ner_json(output)
+    if extracted and validate_ner(extracted):
+        return extracted, True
+    return repaired, False
+
+
 def validate_ner(output: str) -> bool:
     """
     named_entity_recognition: output must be valid JSON matching
@@ -306,7 +398,8 @@ def validate_category_output(category: str, prompt: str, output: str) -> bool:
             last_word = w
 
     if category == "named_entity_recognition":
-        return validate_ner(output)
+        _, ok = coerce_ner_output(output)
+        return ok
     elif category == "sentiment_classification":
         return validate_sentiment(prompt, output)
     elif category == "summarization":

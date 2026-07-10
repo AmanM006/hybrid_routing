@@ -110,6 +110,14 @@ check("average of 0 and 100",
       solve_math_deterministically("What is the average of 0 and 100?"),
       "50")
 
+check("average ignores Index suffix (harness noise)",
+      solve_math_deterministically("What is the average of 12, 18, and 30? Index 7."),
+      "20")
+
+check("average ignores Index number suffix",
+      solve_math_deterministically("What is the average of 5, 10, and 15? Index number 99."),
+      "10")
+
 # --- Should NOT solve (ambiguous / complex) ---
 check("quadratic x^2 + 3x = 10 (ambiguous)",
       solve_math_deterministically("Solve x^2 + 3x - 10 = 0"),

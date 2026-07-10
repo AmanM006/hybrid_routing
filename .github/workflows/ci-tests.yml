@@ -29,6 +29,8 @@ jobs:
 
       - name: Basic solver tests
         run: python test_solvers.py
+      - name: International NER tests
+        run: python test_international_ner.py
 
       - name: Resilience tests
         run: python test_resilience.py
