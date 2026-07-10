@@ -27,6 +27,7 @@ from validators import validate_category_output, validate_ner, verify_math_self_
 from client import FireworksClient, get_max_tokens, get_emergency_fallback
 from deterministic_solvers import (
     solve_math_deterministically,
+    solve_code_debug_deterministically,
     solve_ner_deterministically,
     solve_logic_deterministically,
 )
@@ -34,7 +35,10 @@ from deterministic_solvers import (
 
 # Model configuration
 MODEL_DIR = os.path.join(os.path.dirname(__file__), "models")
-MODEL_PATH = os.path.join(MODEL_DIR, "qwen2.5-1.5b-instruct-q4_k_m.gguf")
+LOCAL_MODEL_FILE = os.environ.get(
+    "LOCAL_MODEL_FILE", "qwen2.5-3b-instruct-q4_k_m.gguf"
+)
+MODEL_PATH = os.path.join(MODEL_DIR, LOCAL_MODEL_FILE)
 
 # DEV_MODE toggle (defaulting to False for production submission)
 DEV_MODE = os.environ.get("DEV_MODE", "false").lower() == "true"
@@ -68,27 +72,35 @@ def start_local_server() -> subprocess.Popen:
         
     try:
         logger.info(f"Launching local llama-server from: {binary} using {MODEL_PATH}...")
+        llama_threads = os.environ.get("LLAMA_THREADS", "2")
         proc = subprocess.Popen(
-            [binary, "-m", MODEL_PATH, "--port", "8085", "-c", "1024", "-t", "4"],
+            [binary, "-m", MODEL_PATH, "--port", "8085", "-c", "1024", "-t", llama_threads],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL
         )
         
         # Poll health endpoint: http://127.0.0.1:8085/health
         health_url = "http://127.0.0.1:8085/health"
-        for i in range(30):
+        startup_polls = int(os.environ.get("LOCAL_STARTUP_POLLS", "120"))  # 120 × 0.5s = 60s max
+        for i in range(startup_polls):
             try:
                 req = urllib.request.Request(health_url)
                 with urllib.request.urlopen(req, timeout=1.0) as response:
                     if response.status == 200:
-                        logger.info("Local llama-server started successfully and is healthy!")
+                        logger.info(
+                            f"Local llama-server started successfully and is healthy! "
+                            f"(ready after ~{(i + 1) * 0.5:.1f}s)"
+                        )
                         local_disabled = False
                         return proc
             except Exception:
                 pass
             time.sleep(0.5)
             
-        logger.warning("Local llama-server failed to report healthy in 15 seconds. Terminating process.")
+        logger.warning(
+            f"Local llama-server failed to report healthy in {startup_polls * 0.5:.0f} seconds. "
+            "Terminating process."
+        )
         proc.terminate()
         local_disabled = True
         return None
@@ -507,81 +519,94 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
                     answer = get_emergency_fallback(category, prompt)
                             
             elif category in ["code_debugging", "code_generation"]:
-                # Try code model first
-                if roles.get("code"):
-                    tier_used = "direct-remote"
-                    model_name = roles["code"]
+                if category == "code_debugging":
                     try:
-                        answer = await client.call_api(
-                            model=roles["code"],
-                            category=category,
-                            prompt=prompt,
-                            timeout=14.0
-                        )
-                        validation_pass = _validate_output(category, prompt, answer)
-                        if validation_pass:
-                            logger.info(f"Task {task_id}: Code model passed validation.")
+                        det_answer = solve_code_debug_deterministically(prompt)
+                        if det_answer is not None and _validate_output(category, prompt, det_answer):
+                            tier_used = "deterministic"
+                            model_name = "none"
+                            answer = det_answer
+                            validation_pass = True
+                            logger.info(f"Task {task_id}: Solved deterministically (code debug).")
                     except Exception as e:
-                        logger.warning(f"Task {task_id}: Code model failed: {e}. Escalating...")
+                        logger.error(f"Task {task_id}: Code debug deterministic solver failed: {e}")
 
-                # Fallback 1: mid model
-                if not validation_pass and roles.get("mid"):
-                    tier_used = "mid-fallback"
-                    model_name = roles["mid"]
-                    try:
-                        logger.info(f"Task {task_id}: Code falling back to mid model: {model_name}")
-                        answer = await client.call_api(
-                            model=roles["mid"],
-                            category=category,
-                            prompt=prompt,
-                            timeout=12.0
-                        )
-                        validation_pass = _validate_output(category, prompt, answer)
-                        if validation_pass:
-                            logger.info(f"Task {task_id}: Code mid fallback model passed validation.")
-                    except Exception as e:
-                        logger.warning(f"Task {task_id}: Code mid fallback failed: {e}. Escalating...")
-
-                # Fallback 2: cheap model
-                if not validation_pass and roles.get("cheap"):
-                    tier_used = "cheap-fallback"
-                    model_name = roles["cheap"]
-                    try:
-                        logger.info(f"Task {task_id}: Code falling back to cheap model: {model_name}")
-                        answer = await client.call_api(
-                            model=roles["cheap"],
-                            category=category,
-                            prompt=prompt,
-                            timeout=10.0
-                        )
-                        validation_pass = _validate_output(category, prompt, answer)
-                        if validation_pass:
-                            logger.info(f"Task {task_id}: Code cheap fallback model passed validation.")
-                    except Exception as e:
-                        logger.warning(f"Task {task_id}: Code cheap fallback failed: {e}. Escalating...")
-
-                # Fallback 3: reasoning model
-                if not validation_pass and roles.get("reasoning"):
-                    tier_used = "reasoning-fallback"
-                    model_name = roles["reasoning"]
-                    try:
-                        logger.info(f"Task {task_id}: Code falling back to reasoning model: {model_name}")
-                        answer = await client.call_api(
-                            model=roles["reasoning"],
-                            category=category,
-                            prompt=prompt,
-                            timeout=12.0
-                        )
-                        validation_pass = _validate_output(category, prompt, answer)
-                        if validation_pass:
-                            logger.info(f"Task {task_id}: Code reasoning fallback model passed validation.")
-                    except Exception as e:
-                        logger.warning(f"Task {task_id}: Code reasoning fallback failed: {e}")
-
-                # Final Emergency Fallback
                 if not validation_pass:
-                    logger.warning(f"Task {task_id}: All models failed for Code. Falling back to emergency placeholder.")
-                    answer = get_emergency_fallback(category, prompt)
+                    # Try code model first
+                    if roles.get("code"):
+                        tier_used = "direct-remote"
+                        model_name = roles["code"]
+                        try:
+                            answer = await client.call_api(
+                                model=roles["code"],
+                                category=category,
+                                prompt=prompt,
+                                timeout=14.0
+                            )
+                            validation_pass = _validate_output(category, prompt, answer)
+                            if validation_pass:
+                                logger.info(f"Task {task_id}: Code model passed validation.")
+                        except Exception as e:
+                            logger.warning(f"Task {task_id}: Code model failed: {e}. Escalating...")
+
+                    # Fallback 1: mid model
+                    if not validation_pass and roles.get("mid"):
+                        tier_used = "mid-fallback"
+                        model_name = roles["mid"]
+                        try:
+                            logger.info(f"Task {task_id}: Code falling back to mid model: {model_name}")
+                            answer = await client.call_api(
+                                model=roles["mid"],
+                                category=category,
+                                prompt=prompt,
+                                timeout=12.0
+                            )
+                            validation_pass = _validate_output(category, prompt, answer)
+                            if validation_pass:
+                                logger.info(f"Task {task_id}: Code mid fallback model passed validation.")
+                        except Exception as e:
+                            logger.warning(f"Task {task_id}: Code mid fallback failed: {e}. Escalating...")
+
+                    # Fallback 2: cheap model
+                    if not validation_pass and roles.get("cheap"):
+                        tier_used = "cheap-fallback"
+                        model_name = roles["cheap"]
+                        try:
+                            logger.info(f"Task {task_id}: Code falling back to cheap model: {model_name}")
+                            answer = await client.call_api(
+                                model=roles["cheap"],
+                                category=category,
+                                prompt=prompt,
+                                timeout=10.0
+                            )
+                            validation_pass = _validate_output(category, prompt, answer)
+                            if validation_pass:
+                                logger.info(f"Task {task_id}: Code cheap fallback model passed validation.")
+                        except Exception as e:
+                            logger.warning(f"Task {task_id}: Code cheap fallback failed: {e}. Escalating...")
+
+                    # Fallback 3: reasoning model
+                    if not validation_pass and roles.get("reasoning"):
+                        tier_used = "reasoning-fallback"
+                        model_name = roles["reasoning"]
+                        try:
+                            logger.info(f"Task {task_id}: Code falling back to reasoning model: {model_name}")
+                            answer = await client.call_api(
+                                model=roles["reasoning"],
+                                category=category,
+                                prompt=prompt,
+                                timeout=12.0
+                            )
+                            validation_pass = _validate_output(category, prompt, answer)
+                            if validation_pass:
+                                logger.info(f"Task {task_id}: Code reasoning fallback model passed validation.")
+                        except Exception as e:
+                            logger.warning(f"Task {task_id}: Code reasoning fallback failed: {e}")
+
+                    # Final Emergency Fallback
+                    if not validation_pass:
+                        logger.warning(f"Task {task_id}: All models failed for Code. Falling back to emergency placeholder.")
+                        answer = get_emergency_fallback(category, prompt)
 
             elif category == "sentiment_classification":
                 # Accuracy-first: mid → reasoning → cheap (no code). v23 cheap-only regressed.
@@ -697,11 +722,13 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
 async def process_single_task(task, roles, client, results_map, output_path, local_sem, remote_sem):
     task_id = task["task_id"]
     prompt = task["prompt"]
+    ctx_token = client.set_task_context(task_id)
     
     if not prompt or not prompt.strip():
         logger.warning(f"Task {task_id}: Empty prompt.")
         results_map[task_id] = {"task_id": task_id, "answer": "No content provided."}
         write_output_results(results_map, output_path)
+        client.reset_task_context(ctx_token)
         return
         
     try:
@@ -711,6 +738,7 @@ async def process_single_task(task, roles, client, results_map, output_path, loc
         logger.error(f"Task {task_id} failed: {e}")
         results_map[task_id] = {"task_id": task_id, "answer": get_emergency_fallback("factual_knowledge", prompt)}
     finally:
+        client.reset_task_context(ctx_token)
         # Update output file on every task completion
         write_output_results(results_map, output_path)
 
@@ -821,7 +849,7 @@ async def main():
     proc = start_local_server()
     
     # 5. Run tasks concurrently
-    max_local_concurrency = int(os.environ.get("MAX_LOCAL_CONCURRENCY", "3"))
+    max_local_concurrency = int(os.environ.get("MAX_LOCAL_CONCURRENCY", "2"))
     max_remote_concurrency = int(os.environ.get("MAX_REMOTE_CONCURRENCY", "4"))
 
     
@@ -850,6 +878,7 @@ async def main():
                 except:
                     pass
         logger.info(f"Finished. Results written to {output_path}")
+        client.print_token_audit()
 
 if __name__ == "__main__":
     asyncio.run(main())

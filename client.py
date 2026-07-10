@@ -2,17 +2,24 @@ import os
 import asyncio
 import logging
 import json
+import contextvars
 from openai import AsyncOpenAI
 import re
 
+from validators import coerce_code_output
+
 logger = logging.getLogger(__name__)
+
+_fireworks_task_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "fireworks_task_id", default=None
+)
 
 # Category instructions — kept lean for token efficiency
 SYSTEM_PROMPTS = {
     "named_entity_recognition": (
-        "Extract entities from the text. Output raw JSON only: "
-        '{"entities": [{"text": "...", "type": "PERSON|ORG|LOCATION|DATE|..."}]}. '
-        "No markdown, no preamble."
+        "Return ONLY valid JSON: "
+        '{"entities":[{"text":"...","type":"PERSON|ORG|LOCATION|DATE|MONEY|PERCENT|PRODUCT|EVENT"}]}. '
+        "No markdown, bullets, headings, or prose."
     ),
     "sentiment_classification": (
         "Classify sentiment (positive/negative/neutral/mixed). "
@@ -30,17 +37,14 @@ SYSTEM_PROMPTS = {
         "Solve the math problem. Show minimal steps, end with 'Answer: <value>' on its own line."
     ),
     "logical_reasoning": (
-        "Solve carefully using only the stated facts. Avoid affirming the consequent, "
-        "converse errors, and assumptions not guaranteed by the premises. "
-        "Show minimal steps, then end with 'Answer: <value>' on its own line."
+        "Solve using only stated facts. End with exactly one line: Answer: <value>. "
+        "No steps, headings, markdown, or explanation."
     ),
     "code_generation": (
         "Write complete functional code in a single markdown code block. No explanation."
     ),
     "code_debugging": (
-        "Fix every stated bug and edge case. Mentally test the corrected code against "
-        "the request, including empty inputs and boundary cases. Output one corrected "
-        "markdown code block only."
+        "Fix the bug. Output one ```python code block only. No reasoning or explanation."
     ),
 }
 
@@ -158,6 +162,82 @@ class FireworksClient:
             api_key=api_key,
             base_url=base_url
         )
+        self.usage_records: list[dict] = []
+
+    @staticmethod
+    def set_task_context(task_id: str | None) -> contextvars.Token:
+        return _fireworks_task_id.set(task_id)
+
+    @staticmethod
+    def reset_task_context(token: contextvars.Token) -> None:
+        _fireworks_task_id.reset(token)
+
+    def _record_token_usage(self, response, model: str, category: str) -> None:
+        usage = getattr(response, "usage", None)
+        if not usage:
+            return
+        prompt_tokens = int(getattr(usage, "prompt_tokens", 0) or 0)
+        completion_tokens = int(getattr(usage, "completion_tokens", 0) or 0)
+        total_tokens = int(getattr(usage, "total_tokens", 0) or 0)
+        if total_tokens == 0:
+            total_tokens = prompt_tokens + completion_tokens
+        task_id = _fireworks_task_id.get() or "__healthcheck__"
+        record = {
+            "task_id": task_id,
+            "category": category,
+            "model": model,
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": total_tokens,
+        }
+        self.usage_records.append(record)
+        print(
+            f"TOKEN_USAGE: task_id={task_id} | category={category} | model={model} | "
+            f"prompt_tokens={prompt_tokens} | completion_tokens={completion_tokens} | "
+            f"total_tokens={total_tokens}",
+            flush=True,
+        )
+
+    def token_audit_summary(self, exclude_task_ids: set[str] | None = None) -> dict:
+        exclude = exclude_task_ids or {"__healthcheck__"}
+        records = [r for r in self.usage_records if r["task_id"] not in exclude]
+        by_category: dict[str, dict] = {}
+        by_task: dict[str, int] = {}
+        total_prompt = total_completion = total_all = 0
+        for r in records:
+            total_prompt += r["prompt_tokens"]
+            total_completion += r["completion_tokens"]
+            total_all += r["total_tokens"]
+            by_task[r["task_id"]] = by_task.get(r["task_id"], 0) + r["total_tokens"]
+            cat = r["category"]
+            if cat not in by_category:
+                by_category[cat] = {
+                    "calls": 0,
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "total_tokens": 0,
+                }
+            by_category[cat]["calls"] += 1
+            by_category[cat]["prompt_tokens"] += r["prompt_tokens"]
+            by_category[cat]["completion_tokens"] += r["completion_tokens"]
+            by_category[cat]["total_tokens"] += r["total_tokens"]
+        n_tasks = len(by_task)
+        return {
+            "fireworks_calls": len(records),
+            "tasks_with_fireworks_calls": n_tasks,
+            "total_prompt_tokens": total_prompt,
+            "total_completion_tokens": total_completion,
+            "total_tokens": total_all,
+            "avg_tokens_per_call": round(total_all / len(records), 1) if records else 0,
+            "avg_tokens_per_task": round(total_all / n_tasks, 1) if n_tasks else 0,
+            "by_category": by_category,
+            "by_task": by_task,
+        }
+
+    def print_token_audit(self, exclude_task_ids: set[str] | None = None) -> dict:
+        summary = self.token_audit_summary(exclude_task_ids)
+        print("TOKEN_AUDIT_SUMMARY:", json.dumps(summary), flush=True)
+        return summary
 
     def _scrub_cot(self, text: str, category: str) -> str:
         """
@@ -168,12 +248,44 @@ class FireworksClient:
         if not text:
             return text
 
-        # For code responses: extract the FIRST valid code block and drop surrounding CoT
+        # For code responses: extract code block or bare def, drop surrounding CoT
         if category in ["code_generation", "code_debugging"]:
-            code_block_match = re.search(r"```(?:python)?\s*\n(.+?)```", text, re.DOTALL)
+            coerced = coerce_code_output(text)
+            if coerced:
+                return coerced
+            code_block_match = re.search(
+                r"```(?:python|javascript|js)?\s*\n(.+?)```", text, re.DOTALL | re.IGNORECASE
+            )
             if code_block_match:
-                return "```python\n" + code_block_match.group(1).rstrip() + "\n```"
+                lang = "javascript" if re.search(r"```(?:javascript|js)\b", text, re.I) else "python"
+                return f"```{lang}\n" + code_block_match.group(1).rstrip() + "\n```"
+            bare_def = re.search(r"(def\s+\w+\([^)]*\):(?:\n(?:    .+))+)", text, re.DOTALL)
+            if bare_def:
+                code = bare_def.group(1).strip()
+                try:
+                    import ast
+                    ast.parse(code)
+                    return f"```python\n{code}\n```"
+                except SyntaxError:
+                    pass
             return text
+
+        if category in ["logical_reasoning", "math_reasoning"]:
+            answer_match = re.search(r"(?im)^answer:\s*(.+)$", text.strip())
+            if answer_match:
+                return f"Answer: {answer_match.group(1).strip()}"
+            # Drop markdown headings / bold preamble; keep last non-empty substantive line
+            lines = [ln.strip() for ln in text.strip().splitlines() if ln.strip()]
+            lines = [
+                ln for ln in lines
+                if not re.match(r"^#+\s", ln)
+                and not re.match(r"^\*\*solution\*\*", ln, re.I)
+                and not ln.startswith("**Solution")
+            ]
+            if lines:
+                last = lines[-1]
+                if len(last.split()) <= 20:
+                    return last if last.lower().startswith("answer:") else f"Answer: {last}"
 
         # For NER: prefer embedded JSON block over line-scrubbing (preserves Unicode names)
         if category == "named_entity_recognition":
@@ -281,10 +393,12 @@ class FireworksClient:
         _USER_SUFFIXES = {
             "sentiment_classification": "\n\nRequired format: <Positive|Negative|Neutral|Mixed> because <brief reason>. You MUST use the word because.",
             "math_reasoning": "\n\nAnswer:",
-            "logical_reasoning": "\n\nAnswer:",
+            "logical_reasoning": "\n\nAnswer: (one line only, no explanation)",
+            "code_debugging": "\n\nReturn one corrected ```python code block only. No explanation.",
+            "code_generation": "\n\nReturn one ``` code block only. No explanation.",
             "named_entity_recognition": (
-                "\n\nReturn every named person, organization, location, event, product, and date. "
-                "Output only {\"entities\":[{\"text\":\"...\",\"type\":\"...\"}]} JSON."
+                "\n\nJSON only — no markdown, bullets, or prose. "
+                '{"entities":[{"text":"...","type":"..."}]}'
             ),
             "summarization": "\n\nSummary:",
         }
@@ -360,6 +474,7 @@ class FireworksClient:
                     
                 if final_text:
                     logger.info(f"API call to {model} succeeded on attempt {attempt+1}")
+                    self._record_token_usage(response, model, category)
                     scrubbed = self._scrub_cot(final_text, category)
                     if category == "summarization":
                         scrubbed = self._enforce_summary_format(scrubbed, prompt)

@@ -1,0 +1,12 @@
+[
+  {"task_id": "nf-01", "prompt": "Extract entities from: Jamie Chen joined Stripe in Dublin last quarter after leaving Goldman Sachs.", "category": "named_entity_recognition", "gold": "Jamie Chen, Stripe, Dublin, last quarter, Goldman Sachs"},
+  {"task_id": "nf-02", "prompt": "Identify all named entities: The FDA approved Ozempic in Washington on March 12, 2025.", "category": "named_entity_recognition", "gold": "FDA, Ozempic, Washington, March 12 2025"},
+  {"task_id": "nf-03", "prompt": "List entities with types from: Revenue grew 18% to $4.2M after the Acme Robotics launch in Austin next month.", "category": "named_entity_recognition", "gold": "18%, $4.2M, Acme Robotics, Austin, next month"},
+  {"task_id": "nf-04", "prompt": "Extract named entities: Prof. Elena Rossi at University of Milan presented findings in Rome during FY2024.", "category": "named_entity_recognition", "gold": "Elena Rossi, University of Milan, Rome, FY2024"},
+  {"task_id": "nf-05", "prompt": "Pull out people, orgs, places, dates: Sundar Pichai spoke at Google I/O in Mountain View yesterday.", "category": "named_entity_recognition", "gold": "Sundar Pichai, Google, Mountain View, yesterday"},
+  {"task_id": "nf-06", "prompt": "NER — extract from: NATO held talks in Brussels with Ursula von der Leyen in January 2026.", "category": "named_entity_recognition", "gold": "NATO, Brussels, Ursula von der Leyen, January 2026"},
+  {"task_id": "nf-07", "prompt": "Find entities in: Pfizer shipped 500,000 doses from Kalamazoo to Toronto this week.", "category": "named_entity_recognition", "gold": "Pfizer, Kalamazoo, Toronto, this week"},
+  {"task_id": "nf-08", "prompt": "Extract entities: Mr. David Okonkwo founded BrightPath Analytics in Lagos before moving to London.", "category": "named_entity_recognition", "gold": "David Okonkwo, BrightPath Analytics, Lagos, London"},
+  {"task_id": "nf-09", "prompt": "Identify entities: The World Bank lent $250M to Kenya for solar projects announced on May 1, 2024.", "category": "named_entity_recognition", "gold": "World Bank, $250M, Kenya, May 1 2024"},
+  {"task_id": "nf-10", "prompt": "Extract all entities from: Lisa Wang at Morgan Stanley closed the deal in Hong Kong last month.", "category": "named_entity_recognition", "gold": "Lisa Wang, Morgan Stanley, Hong Kong, last month"}
+]

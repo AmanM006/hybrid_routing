@@ -121,22 +121,33 @@ def validate_ner(output: str, prompt: str = "") -> bool:
     """
     named_entity_recognition: output must be valid JSON matching
     {"entities": [{"text": "...", "type": "PERSON|ORG|LOCATION|DATE|..."}]}.
-    Reject if JSON doesn't parse, entities key missing, or any entry missing text/type.
-    Also performs entity-count sanity check: if prompt has many proper nouns but
-    entities list is suspiciously sparse, reject to try next tier.
+    Reject markdown wrappers, bullet lists, and prose-only answers so the
+    cascade can retry/escalate to the next tier.
     """
     try:
+        if not output or not output.strip():
+            return False
+        stripped = output.strip()
+        # Reject bullet-list or heading-only answers with no JSON object
+        if "{" not in stripped and re.search(r"(?m)^\s*[-*•]\s", stripped):
+            logger.warning("NER Validation Failed: Bullet list without JSON.")
+            return False
+        if re.search(r"(?m)^\s*(?:people|companies|organizations|places|locations)\s*:", stripped, re.I):
+            if "{" not in stripped:
+                logger.warning("NER Validation Failed: Heading format without JSON.")
+                return False
         # Strip markdown code block fences if present (e.g. ```json ... ```)
-        stripped = re.sub(r"^```(?:json)?\s*", "", output.strip(), flags=re.IGNORECASE)
+        stripped = re.sub(r"^```(?:json)?\s*", "", stripped, flags=re.IGNORECASE)
         stripped = re.sub(r"\s*```$", "", stripped.strip())
-        # Try to find a JSON object block in case there's preamble
-        start = stripped.find('{')
-        end = stripped.rfind('}')
+        start = stripped.find("{")
+        end = stripped.rfind("}")
         if start == -1 or end == -1 or end < start:
             logger.warning("NER Validation Failed: No curly braces found.")
             return False
-
-        
+        preamble = stripped[:start].strip()
+        if preamble and not preamble.lower().startswith("json"):
+            logger.warning("NER Validation Failed: Prose preamble before JSON.")
+            return False
         json_str = stripped[start:end+1]
         data = json.loads(json_str)
         
@@ -386,6 +397,42 @@ def validate_reasoning(output: str) -> bool:
         return False
     return True
 
+def coerce_code_output(output: str) -> str | None:
+    """Normalize code model output to a fenced Python block when possible."""
+    if not output or not output.strip():
+        return None
+    fenced = re.search(r"```(?:python|javascript|js)?\s*\n(.+?)```", output, re.DOTALL | re.IGNORECASE)
+    if fenced:
+        lang = "javascript" if re.search(r"```(?:javascript|js)\b", output, re.I) else "python"
+        return f"```{lang}\n{fenced.group(1).strip()}\n```"
+    idx = output.find("def ")
+    if idx == -1:
+        return None
+    lines = []
+    for ln in output[idx:].splitlines():
+        stripped = ln.strip()
+        if not lines:
+            lines.append(ln.rstrip())
+            continue
+        if ln.startswith((" ", "\t")) or re.match(
+            r"(if|elif|else|while|for|return|try|except|finally|with|pass|break|continue|raise|#)",
+            stripped,
+        ):
+            lines.append(ln.rstrip())
+        elif not stripped:
+            break
+        else:
+            break
+    code = "\n".join(lines).strip()
+    if not code.startswith("def "):
+        return None
+    try:
+        ast.parse(code)
+    except SyntaxError:
+        return None
+    return f"```python\n{code}\n```"
+
+
 def validate_code(prompt: str, output: str, is_debugging: bool = False) -> bool:
     """
     code_debugging / code_generation: output must contain a code block;
@@ -396,6 +443,9 @@ def validate_code(prompt: str, output: str, is_debugging: bool = False) -> bool:
     # If no code fence, check if the raw output is valid Python and auto-wrap it
     if "```" not in output:
         output_stripped = output.strip()
+        bare_def = re.search(r"(def\s+\w+\([^)]*\):(?:\n(?:    .+))+)", output_stripped, re.DOTALL)
+        if bare_def:
+            output_stripped = bare_def.group(1).strip()
         is_python_candidate = ("def " in output_stripped or "import " in output_stripped
                                or "return " in output_stripped or "class " in output_stripped)
         if is_python_candidate:
@@ -481,7 +531,13 @@ def validate_category_output(category: str, prompt: str, output: str) -> bool:
     elif category in ["math_reasoning", "logical_reasoning"]:
         return validate_reasoning(output)
     elif category == "code_generation":
+        coerced = coerce_code_output(output)
+        if coerced:
+            output = coerced
         return validate_code(prompt, output, is_debugging=False)
     elif category == "code_debugging":
+        coerced = coerce_code_output(output)
+        if coerced:
+            output = coerced
         return validate_code(prompt, output, is_debugging=True)
     return True

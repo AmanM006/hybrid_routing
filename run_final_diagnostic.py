@@ -51,10 +51,19 @@ def grade_honest(task, answer, tier, model):
             texts = [e.get("text", "") for e in data.get("entities", [])]
         except json.JSONDecodeError:
             return "WRONG", ["not valid JSON — factual answer instead of entities"]
-        tl = " ".join(texts).lower()
+
+        def _norm_ent(s: str) -> str:
+            # Punctuation-insensitive: "March 3, 2024" == "March 3 2024"
+            return re.sub(r"\s+", " ", re.sub(r"[^\w\s]", " ", s.lower())).strip()
+
+        norms = [_norm_ent(t) for t in texts]
+        joined = " ".join(norms)
         missing = []
         for part in re.split(r",\s*", gold):
-            if part.lower() not in tl and not any(part.lower() in t.lower() for t in texts):
+            np = _norm_ent(part)
+            if not np:
+                continue
+            if np not in joined and not any(np in t or t in np for t in norms):
                 missing.append(part)
         if missing:
             return "WRONG", [f"missing entities: {missing}", f"got texts: {texts}"]

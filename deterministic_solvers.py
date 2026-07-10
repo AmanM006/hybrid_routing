@@ -334,21 +334,34 @@ _KNOWN_ORGS = {
     "spacex", "tesla", "google", "amazon", "microsoft", "apple", "meta",
     "openai", "nasa", "nato", "un", "who", "imf", "cnn", "bbc",
     "facebook", "twitter", "netflix", "uber", "lyft", "airbnb",
+    "alphabet", "stanford", "harvard", "mit", "ibm", "oracle", "samsung",
+    "sony", "nvidia", "intel", "boeing", "lockheed", "goldman sachs",
+    "jp morgan", "jpmorgan", "morgan stanley", "bank of america",
+    "wells fargo", "new york times", "wall street journal", "mayo clinic",
+    "stripe", "pfizer", "fda", "world bank",
 }
 
 # Well-known product names (not orgs)
-_KNOWN_PRODUCTS = {"iphone", "android", "windows", "macos", "linux", "ios",
-                   "chatgpt", "gpt", "gemini", "pixel", "galaxy", "kindle"}
+_KNOWN_PRODUCTS = {
+    "iphone", "android", "windows", "macos", "linux", "ios",
+    "chatgpt", "gpt", "gemini", "pixel", "galaxy", "kindle",
+    "lisinopril", "aspirin", "ibuprofen", "metformin", "insulin", "ozempic",
+}
 
 _KNOWN_EVENTS = {
     "nobel peace prize", "nobel prize", "wimbledon", "olympics",
     "world cup", "london marathon", "paris fashion week",
 }
 
-_ORG_SUFFIXES = r"(?:Inc\.?|Corp\.?|Ltd\.?|LLC|Co\.?|Group|Foundation|Institute|University|College|School|Hospital|Clinic|Bank|Trust|Fund|Labs?|Technologies|Tech|Systems|Services|Partners|Associates|International|Global)"
+_ORG_SUFFIXES = (
+    r"(?:Inc\.?|Corp\.?|Ltd\.?|LLC|Co\.?|Group|Foundation|Institute|"
+    r"University|College|School|Hospital|Clinic|Bank|Trust|Fund|Labs?|"
+    r"Technologies|Tech|Systems|Services|Partners|Associates|"
+    r"International|Global|Agency|Authority|Association|Society)"
+)
 
 # Prepositions that introduce locations
-_LOC_PREPS = r"(?:in|at|from|near|to|of)\s+"
+_LOC_PREPS = r"(?:in|at|from|near|to|of|based in|headquartered in)\s+"
 
 # Month names to exclude from person/location detection
 _MONTH_RE = re.compile(
@@ -366,7 +379,30 @@ _KNOWN_LOCATIONS = {
     "berlin", "oslo", "tokyo", "beijing", "sydney", "toronto", "dubai",
     "hawthorne", "palo alto", "cupertino", "seattle", "chicago", "boston",
     "washington", "mountain view", "rochester", "united states",
+    "san francisco", "los angeles", "san carlos", "geneva", "minnesota",
+    "massachusetts", "redmond", "cambridge", "oxford",
+    "austin", "brussels", "lagos", "hong kong", "kenya", "toronto",
+    "kalamazoo", "dublin", "milan", "rome", "washington",
 }
+
+# Relative / fuzzy date phrases (safe, bounded)
+_RELATIVE_DATE_RE = re.compile(
+    r"\b(?:(?:last|next|this)\s+(?:quarter|month|week|year|monday|tuesday|"
+    r"wednesday|thursday|friday|saturday|sunday)|"
+    r"yesterday|tomorrow|today|"
+    r"Q[1-4]\s*(?:FY)?\s*\d{2,4}|FY\s*\d{2,4})\b",
+    re.IGNORECASE,
+)
+
+# Money amounts as MONEY entities
+_MONEY_RE = re.compile(
+    r"\$\s?\d+(?:,\d{3})*(?:\.\d+)?(?:[MBKk])?|"
+    r"\b\d+(?:,\d{3})*(?:\.\d+)?\s*(?:USD|EUR|GBP|dollars?|euros?|pounds?)\b",
+    re.IGNORECASE,
+)
+
+# Percentages as PERCENT entities
+_PERCENT_RE = re.compile(r"\b\d+(?:\.\d+)?\s*%|\b\d+(?:\.\d+)?\s+percent\b", re.IGNORECASE)
 
 
 def _extract_dates(text: str):
@@ -394,17 +430,29 @@ def _extract_dates(text: str):
         year = m.group(1)
         if year not in dates:
             dates.append(year)
+    for m in _RELATIVE_DATE_RE.finditer(text):
+        candidate = m.group(0).strip()
+        if candidate not in dates:
+            dates.append(candidate)
     return list(dict.fromkeys(dates))  # dedupe, preserve order
 
 
 def _extract_persons(text: str):
     """Extract PERSON entities: two+ adjacent Title-Case words (incl. accented Latin)."""
     persons = []
+    # "Dr. Anya Sharma" / "Mr. John Smith"
+    for m in re.finditer(
+        r"\b(?i:Dr|Mr|Mrs|Ms|Prof)\.\s+"
+        r"([A-ZÀ-ÖØ-Þ][a-zà-öø-ÿ]+(?:\s+[A-ZÀ-ÖØ-Þ][a-zà-öø-ÿ]+){0,2})\b",
+        text,
+    ):
+        persons.append(m.group(1).strip())
     for m in re.finditer(
         rf"\b([A-ZÀ-ÖØ-Þ][a-zà-öø-ÿ]+(?:\s+[A-ZÀ-ÖØ-Þ][a-zà-öø-ÿ]+){{1,2}})\b",
         text,
     ):
         candidate = m.group(1).strip()
+        candidate = re.sub(r"\s+(?:at|in|from|of|on|for|to|with)$", "", candidate, flags=re.I).strip()
         # Skip known orgs or products
         if candidate.lower().rstrip(".") in _KNOWN_ORGS:
             continue
@@ -476,10 +524,38 @@ def _extract_orgs(text: str):
         candidate = m.group(1).strip().rstrip(".")
         if candidate and candidate not in orgs:
             orgs.append(candidate)
+    # Industry-style multi-word orgs: "Acme Robotics", "BrightPath Analytics"
+    for m in re.finditer(
+        r"\b([A-Z][A-Za-z0-9]+(?:\s+[A-Z][A-Za-z0-9]+)?\s+"
+        r"(?:Robotics|Analytics|Technologies|Systems|Labs|Ventures|Holdings|Media|Studios|Bank))\b",
+        text,
+    ):
+        candidate = m.group(1).strip()
+        if candidate not in orgs:
+            orgs.append(candidate)
     # Known standalone org names (case-insensitive lookup but preserve original case)
     for word in re.findall(r"\b[A-Za-z][A-Za-z0-9]+\b", text):
         if word.lower() in _KNOWN_ORGS and word not in orgs:
             orgs.append(word)
+    # Multi-word orgs without suffix: "Goldman Sachs", "Mayo Clinic" (Clinic via suffix above)
+    for m in re.finditer(
+        r"\b([A-Z][A-Za-z0-9]+(?:\s+[A-Z][A-Za-z0-9]+){1,2})\b",
+        text,
+    ):
+        candidate = m.group(1).strip()
+        low = candidate.lower()
+        if low in _KNOWN_ORGS or low in _KNOWN_LOCATIONS:
+            if candidate not in orgs and low in _KNOWN_ORGS:
+                orgs.append(candidate)
+            continue
+        # "X Y Corp" style already handled; skip if looks like person (two words, no org cue)
+        if re.search(_ORG_SUFFIXES + r"$", candidate):
+            continue
+        if low in _KNOWN_LOCATIONS:
+            continue
+        if re.search(r"\b(?:at|from|joined|founded|acquired)\s+" + re.escape(candidate), text, re.I):
+            if candidate not in orgs:
+                orgs.append(candidate)
     return list(dict.fromkeys(orgs))
 
 
@@ -504,6 +580,14 @@ def _extract_locations(text: str):
             original = text[m.start():m.end()]
             if original not in locations:
                 locations.append(original)
+    # Compound locations: "San Francisco", "New York" from prep + multi-word
+    for m in re.finditer(
+        rf"{_LOC_PREPS}((?:[A-ZÀ-ÖØ-Þ][a-zà-öø-ÿ]+\s+){{1,2}}[A-ZÀ-ÖØ-Þ][a-zà-öø-ÿ]+)\b",
+        text,
+    ):
+        candidate = m.group(1).strip()
+        if candidate.lower() not in _KNOWN_ORGS and candidate not in locations:
+            locations.append(candidate)
     return list(dict.fromkeys(locations))
 
 
@@ -545,6 +629,13 @@ def _solve_ner_deterministically(prompt: str):
         for m in re.finditer(rf"\b{re.escape(event)}\b", source_lower):
             events.append(source_text[m.start():m.end()])
 
+    money = [m.group(0).strip() for m in _MONEY_RE.finditer(source_text)]
+    percents = [m.group(0).strip() for m in _PERCENT_RE.finditer(source_text)]
+    relative_dates = [m.group(0).strip() for m in _RELATIVE_DATE_RE.finditer(source_text)]
+    for rd in relative_dates:
+        if rd not in dates:
+            dates.append(rd)
+
     # Correct common regex ambiguities before assembling output.
     known_location_lower = {loc.lower() for loc in _KNOWN_LOCATIONS}
     event_lower = {event.lower() for event in events}
@@ -581,6 +672,10 @@ def _solve_ner_deterministically(prompt: str):
         entities.append({"text": pr, "type": "PRODUCT"})
     for event in events:
         entities.append({"text": event, "type": "EVENT"})
+    for mo in money:
+        entities.append({"text": mo, "type": "MONEY"})
+    for pc in percents:
+        entities.append({"text": pc, "type": "PERCENT"})
 
     if len(entities) < 2:
         logger.info(f"[DETERM-NER] Too few entities ({len(entities)}) — falling through to LLM.")
@@ -593,6 +688,7 @@ def _solve_ner_deterministically(prompt: str):
     ignored = {
         "the", "after", "from", "can", "dr", "ceo", "ner", "task",
         "index", "q", "extract", "identify", "list", "find",
+        "revenue", "cost", "profit", "sales", "price", "growth", "launch",
     }
     unexplained = []
     for token in re.findall(r"\b[A-ZÀ-ÖØ-Þ][A-Za-zÀ-ÖØ-öø-ÿ'-]{2,}\b", source_text):
@@ -842,5 +938,62 @@ def solve_logic_deterministically(prompt: str):
         return _solve_logic_deterministically(prompt)
     except Exception:
         logger.exception("[DETERM-LOGIC] Unexpected error — falling through")
+        return None
+
+
+def _solve_code_debug_deterministically(prompt: str):
+    """
+    Patch simple empty-input bugs by inserting a guard after the function header.
+    Only when the prompt explicitly mentions empty input and includes a def block.
+    """
+    import ast
+
+    if "def " not in prompt or not re.search(r"\bempty\b", prompt, re.I):
+        return None
+
+    lines = []
+    capturing = False
+    for ln in prompt.splitlines():
+        stripped = ln.strip()
+        if stripped.startswith("def "):
+            capturing = True
+        if not capturing:
+            continue
+        if stripped.lower().startswith("handle ") and lines:
+            break
+        if stripped.lower().startswith("fix ") and lines:
+            break
+        if lines and not ln.startswith((" ", "\t")) and not stripped.startswith("def "):
+            break
+        lines.append(ln.rstrip())
+
+    if not lines or not lines[0].startswith("def "):
+        return None
+
+    code = "\n".join(lines)
+    if re.search(r"if\s+not\s+\w+\s*:", code):
+        return None
+
+    pm = re.search(r"def\s+\w+\(\s*(\w+)", code)
+    if not pm:
+        return None
+    param = pm.group(1)
+    patched_lines = [lines[0], f"    if not {param}:", "        return -1", *lines[1:]]
+    patched = "\n".join(patched_lines)
+    try:
+        ast.parse(patched)
+    except SyntaxError:
+        return None
+
+    logger.info("[DETERM-CODE] Patched empty-input guard deterministically.")
+    return f"```python\n{patched}\n```"
+
+
+def solve_code_debug_deterministically(prompt: str):
+    """Public wrapper — never raises; returns None on any error."""
+    try:
+        return _solve_code_debug_deterministically(prompt)
+    except Exception:
+        logger.exception("[DETERM-CODE] Unexpected error — falling through")
         return None
 

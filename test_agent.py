@@ -148,6 +148,20 @@ class TestGeneralPurposeAgent(unittest.IsolatedAsyncioTestCase):
         for prompt in prompts:
             self.assertEqual(await classify_prompt(prompt), "named_entity_recognition")
 
+    async def test_summarization_not_math_with_percent(self):
+        prompt = (
+            "Summarize for a busy manager (under 20 words): Our Q3 revenue rose 8% "
+            "year-over-year driven by enterprise subscriptions, while consumer churn ticked up slightly."
+        )
+        self.assertEqual(await classify_prompt(prompt), "summarization")
+
+    async def test_probability_coin_is_logic_not_math(self):
+        prompt = (
+            "You flip a fair coin three times and get heads each time. "
+            "What is the probability the next flip is heads? Reply with a fraction."
+        )
+        self.assertEqual(await classify_prompt(prompt), "logical_reasoning")
+
     async def test_edge_cases_classification(self):
         """
         Tests weird unicode prompts, super long inputs, prompts with no clear category,
@@ -228,10 +242,17 @@ class TestGeneralPurposeAgent(unittest.IsolatedAsyncioTestCase):
             {"text": "Wimbledon", "type": "EVENT"},
             event_entities,
         )
-        self.assertIsNone(solve_ner_deterministically(
+        self.assertIsNotNone(solve_ner_deterministically(
             "Can you extract named entities from this customer note? "
             "Dr. Anya Sharma at Mayo Clinic in Rochester prescribed Lisinopril on March 3, 2024."
         ))
+        clinic_result = solve_ner_deterministically(
+            "Can you extract named entities from this customer note? "
+            "Dr. Anya Sharma at Mayo Clinic in Rochester prescribed Lisinopril on March 3, 2024."
+        )
+        clinic_entities = {e["text"] for e in json.loads(clinic_result)["entities"]}
+        self.assertIn("Lisinopril", clinic_entities)
+        self.assertIn("Mayo Clinic", clinic_entities)
 
         repaired, ok = coerce_ner_output(
             "**People:** Sundar Pichai\n"
@@ -243,6 +264,28 @@ class TestGeneralPurposeAgent(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             {e["text"] for e in data["entities"]},
             {"Sundar Pichai", "Google", "Alphabet", "Mountain View"},
+        )
+
+    def test_code_debugging_bare_def_scrub(self):
+        client = FireworksClient("k", "https://example.com")
+        kimi_style = (
+            "Here is the fixed binary search with empty array handling:\n\n"
+            "def bsearch(a, x):\n"
+            "    if not a:\n"
+            "        return -1\n"
+            "    lo, hi = 0, len(a)\n"
+            "    while lo < hi:\n"
+            "        mid = (lo+hi)//2\n"
+            "        if a[mid] < x:\n"
+            "            lo = mid+1\n"
+            "        else:\n"
+            "            hi = mid\n"
+            "    return lo\n"
+        )
+        scrubbed = client._scrub_cot(kimi_style, "code_debugging")
+        self.assertIn("```python", scrubbed)
+        self.assertTrue(
+            validate_category_output("code_debugging", "def bsearch(a, x): pass", scrubbed)
         )
 
 
