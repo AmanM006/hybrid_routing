@@ -295,11 +295,10 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
     category = await classify_prompt(prompt, local_llm_callable=local_callable)
     
     easy_categories = [
-        "factual_knowledge", 
-        "sentiment_classification", 
+        "factual_knowledge",
         "summarization",
-        # NOTE: named_entity_recognition is intentionally excluded from easy_categories.
-        # It has its own deterministic first-pass above and goes direct-remote if that fails.
+        # sentiment_classification: skip local tier — gemma returns label-only without justification
+        # named_entity_recognition: deterministic first-pass, then direct-remote if that fails
     ]
     
     tier_used = "unknown"

@@ -40,6 +40,10 @@ NER_CASES = [
         "Extract all named entities and their types from: Apple Inc. released the first iPhone in January 2007 under CEO Steve Jobs.",
         ["Apple Inc.", "iPhone", "Steve Jobs", "January 2007"]
     ),
+    (
+        "Extract entities: John Doe works at TechCorp in Tokyo. Index 1.",
+        ["John Doe", "TechCorp", "Tokyo"]
+    ),
 ]
 
 SHOULD_FALLTHROUGH = [

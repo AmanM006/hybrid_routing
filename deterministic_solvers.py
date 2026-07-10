@@ -327,15 +327,44 @@ def _extract_persons(text: str):
     return list(dict.fromkeys(persons))
 
 
+def _extract_ner_source_text(prompt: str) -> str:
+    """
+    Isolate the sentence to tag from an extraction prompt.
+    Strips instruction boilerplate and harness 'Index N' suffixes so each
+  task is parsed from its actual content, not a shared template prefix.
+    """
+    p = prompt.strip()
+    m = re.search(
+        r"(?:\bextract\b[^:]*?\bentities?\b|\bentities?\b)\s*:\s*(.+)",
+        p,
+        re.IGNORECASE | re.DOTALL,
+    )
+    if m:
+        text = m.group(1).strip()
+    else:
+        from_m = re.search(r"from\s*:\s*(.+)$", p, re.IGNORECASE | re.DOTALL)
+        text = from_m.group(1).strip() if from_m else p
+    text = re.sub(r"\s*Index\s+\d+\.?\s*$", "", text, flags=re.IGNORECASE).strip()
+    return text
+
+
 def _extract_orgs(text: str):
-    """Extract ORG entities: known orgs + Title-Case words before suffix."""
+    """Extract ORG entities: known orgs + spaced suffix + embedded suffix (TechCorp)."""
     orgs = []
-    # Explicit suffix pattern: "Apple Inc.", "SpaceX Corp"
+    # Spaced suffix pattern: "Apple Inc.", "SpaceX Corp"
     for m in re.finditer(
         rf"\b([A-Z][A-Za-z0-9]+(?:\s+[A-Z][A-Za-z0-9]+)*)\s+{_ORG_SUFFIXES}",
         text
     ):
         orgs.append(m.group(0).strip())
+    # Embedded suffix: TechCorp, MetaCorp (single token ending in Inc/Corp/Ltd/...)
+    for m in re.finditer(
+        rf"\b([A-Z][A-Za-z0-9]*(?:{_ORG_SUFFIXES}))\.?\b",
+        text
+    ):
+        candidate = m.group(1).strip().rstrip(".")
+        if candidate and candidate not in orgs:
+            orgs.append(candidate)
     # Known standalone org names (case-insensitive lookup but preserve original case)
     for word in re.findall(r"\b[A-Za-z][A-Za-z0-9]+\b", text):
         if word.lower() in _KNOWN_ORGS and word not in orgs:
@@ -385,9 +414,7 @@ def _solve_ner_deterministically(prompt: str):
     ):
         return None
 
-    # Extract the source sentence (after "from:" or the full prompt)
-    source_match = re.search(r"from\s*:\s*(.+)$", prompt, re.IGNORECASE | re.DOTALL)
-    source_text = source_match.group(1).strip() if source_match else prompt
+    source_text = _extract_ner_source_text(prompt)
 
     dates = _extract_dates(source_text)
     orgs = _extract_orgs(source_text)
@@ -431,6 +458,15 @@ def _solve_ner_deterministically(prompt: str):
     if len(entities) < 2:
         logger.info(f"[DETERM-NER] Too few entities ({len(entities)}) — falling through to LLM.")
         return None
+
+    # If prompt says "works at X" but we missed X, do not return a partial answer
+    works_at = re.search(r"\bworks\s+at\s+([A-Z][A-Za-z0-9]+)\b", source_text)
+    if works_at:
+        org_hint = works_at.group(1)
+        found_texts = [e["text"].lower() for e in entities]
+        if not any(org_hint.lower() in t for t in found_texts):
+            logger.info(f"[DETERM-NER] Missing org from 'works at {org_hint}' — falling through to LLM.")
+            return None
 
     result = json.dumps({"entities": entities})
     logger.info(f"[DETERM-NER] Extracted {len(entities)} entities deterministically.")
