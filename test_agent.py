@@ -187,12 +187,14 @@ class TestGeneralPurposeAgent(unittest.IsolatedAsyncioTestCase):
         
         self.assertTrue(validate_category_output("sentiment_classification", prompt, "positive - because the user loved it."))
         self.assertTrue(validate_category_output("sentiment_classification", prompt, "The sentiment is negative because it was bad."))
-        self.assertTrue(validate_category_output("sentiment_classification", prompt, "positive")) # Accepted single-word label
+        # Now rejected to force cheap model to produce justification
+        self.assertFalse(validate_category_output("sentiment_classification", prompt, "positive"))
 
-        # Justification requested (still accepted even if short to prevent over-rejection)
+        # Justification requested
         prompt_with_just = "Determine the sentiment (positive/negative) and provide a justification."
         self.assertTrue(validate_category_output("sentiment_classification", prompt_with_just, "positive because it has excellent features"))
-        self.assertTrue(validate_category_output("sentiment_classification", prompt_with_just, "positive")) # Accepted anyway to avoid over-rejection
+        # Now rejected to force cheap model to produce justification
+        self.assertFalse(validate_category_output("sentiment_classification", prompt_with_just, "positive"))
 
 
     def test_summarization_validator(self):

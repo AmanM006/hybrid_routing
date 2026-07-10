@@ -325,7 +325,7 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
     if category == "named_entity_recognition":
         try:
             det_answer = solve_ner_deterministically(prompt)
-            if det_answer is not None and validate_ner(det_answer):
+            if det_answer is not None and validate_ner(det_answer, prompt):
                 logger.info(f"Task {task_id}: Solved deterministically (NER). Answer={det_answer!r}")
                 latency = time.time() - start_time
                 print(f"TASK_LOG: task_id={task_id} | category={category} | tier=deterministic | "
@@ -420,8 +420,8 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
                 except Exception as e:
                     logger.warning(f"Task {task_id}: Mid remote model failed: {e}. Escalating...")
                     
-            # Fallback 1: Reasoning remote role
-            if not validation_pass and roles.get("reasoning"):
+            # Fallback 1: Reasoning remote role (only for non-sentiment categories)
+            if not validation_pass and roles.get("reasoning") and category not in ["sentiment_classification"]:
                 tier_used = "reasoning-fallback"
                 model_name = roles["reasoning"]
                 try:
@@ -438,25 +438,7 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
                 except Exception as e:
                     logger.warning(f"Task {task_id}: Easy category reasoning fallback failed: {e}. Escalating...")
 
-            # Fallback 2: Code remote role
-            if not validation_pass and roles.get("code"):
-                tier_used = "code-fallback"
-                model_name = roles["code"]
-                try:
-                    logger.info(f"Task {task_id}: Easy category falling back to code model: {model_name}")
-                    answer = await client.call_api(
-                        model=roles["code"],
-                        category=category,
-                        prompt=prompt,
-                        timeout=12.0
-                    )
-                    validation_pass = _validate_output(category, prompt, answer)
-                    if validation_pass:
-                        logger.info(f"Task {task_id}: Easy category code fallback passed validation.")
-                except Exception as e:
-                    logger.warning(f"Task {task_id}: Easy category code fallback failed: {e}")
-
-            # Final Emergency Fallback
+            # Final Emergency Fallback (no code model for easy categories)
             if not validation_pass:
                 logger.warning(f"Task {task_id}: All remote models failed for Easy Category. Falling back to emergency placeholder.")
                 answer = get_emergency_fallback(category, prompt)
@@ -519,25 +501,7 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
                     except Exception as e:
                         logger.warning(f"Task {task_id}: Math/Logic cheap fallback failed: {e}. Escalating...")
 
-                # Fallback 3: code model
-                if not validation_pass and roles.get("code"):
-                    tier_used = "code-fallback"
-                    model_name = roles["code"]
-                    try:
-                        logger.info(f"Task {task_id}: Math/Logic falling back to code model: {model_name}")
-                        answer = await client.call_api(
-                            model=roles["code"],
-                            category=category,
-                            prompt=prompt,
-                            timeout=12.0
-                        )
-                        validation_pass = _validate_output(category, prompt, answer)
-                        if validation_pass:
-                            logger.info(f"Task {task_id}: Math/Logic code fallback model passed validation.")
-                    except Exception as e:
-                        logger.warning(f"Task {task_id}: Math/Logic code fallback failed: {e}")
-
-                # Final Emergency Fallback
+                # Final Emergency Fallback (no code model for math/logic)
                 if not validation_pass:
                     logger.warning(f"Task {task_id}: All models failed for Math/Logic. Falling back to emergency placeholder.")
                     answer = get_emergency_fallback(category, prompt)
@@ -619,13 +583,41 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
                     logger.warning(f"Task {task_id}: All models failed for Code. Falling back to emergency placeholder.")
                     answer = get_emergency_fallback(category, prompt)
 
+            elif category == "sentiment_classification":
+                # P3: cheap → mid → emergency (no reasoning, no code)
+                for tier_name, role_key, timeout in [
+                    ("cheap-remote", "cheap", 9.0),
+                    ("mid-fallback", "mid", 10.0),
+                ]:
+                    model = roles.get(role_key)
+                    if not model or validation_pass:
+                        continue
+                    tier_used = tier_name
+                    model_name = model
+                    try:
+                        answer = await client.call_api(
+                            model=model,
+                            category=category,
+                            prompt=prompt,
+                            timeout=timeout,
+                        )
+                        validation_pass = _validate_output(category, prompt, answer)
+                        if validation_pass:
+                            logger.info(f"Task {task_id}: Sentiment {tier_name} passed validation.")
+                    except Exception as e:
+                        logger.warning(f"Task {task_id}: Sentiment {tier_name} failed: {e}")
+
+                if not validation_pass:
+                    logger.warning(f"Task {task_id}: Sentiment cascade exhausted — emergency fallback.")
+                    answer = get_emergency_fallback(category, prompt)
+
             elif category == "named_entity_recognition":
                 best_raw = ""
+                # P0/P1: mid first (cheap tokens), then reasoning; no code model
                 ner_tiers = [
-                    ("direct-remote", roles.get("reasoning"), 14.0),
                     ("mid-fallback", roles.get("mid"), 12.0),
+                    ("direct-remote", roles.get("reasoning"), 14.0),
                     ("cheap-fallback", roles.get("cheap"), 10.0),
-                    ("code-fallback", roles.get("code"), 12.0),
                 ]
                 seen_models = set()
                 for tier_name, model, timeout in ner_tiers:

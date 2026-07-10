@@ -66,8 +66,22 @@ async def classify_prompt(prompt: str, local_llm_callable=None) -> str:
     """
     prompt_lower = prompt.lower()
     
-    # High-priority logic puzzle check
-    if any(x in prompt_lower for x in ["who owns", "different pet", "does not own", "knights and knaves", "logic puzzle"]) or "if all" in prompt_lower or ("is a" in prompt_lower and "always" in prompt_lower):
+    # High-priority logic puzzle check — constraint assignment puzzles
+    # Catches "Sam, Jo, Lee each own/like/play/drink one of: cat, dog, bird"
+    _LOGIC_VERBS = r"(?:owns?|likes?|plays?|drinks?|wears?|prefers?|eats?|has|uses?|drives?)"
+    if (
+        any(x in prompt_lower for x in [
+            "who owns", "different pet", "does not own", "knights and knaves", "logic puzzle"
+        ]) or
+        "if all" in prompt_lower or
+        ("is a" in prompt_lower and "always" in prompt_lower) or
+        # "each [verb] one of: ..."  → assignment puzzle
+        re.search(r"each\s+[a-z]+\s+one\s+of\b", prompt_lower) or
+        # "does not [verb]" as a negative constraint
+        re.search(r"does\s+not\s+(?:own|like|play|drink|wear|prefer|use|drive|eat)\b", prompt_lower) or
+        # "who [verb]s the ..."  as the query
+        re.search(r"\bwho\s+(?:owns|likes|plays|drinks|wears|prefers|eats|uses|drives)\b", prompt_lower)
+    ):
         return "logical_reasoning"
         
     # Comparative deductive reasoning (X older/taller than Y, therefore...)
@@ -147,8 +161,17 @@ async def classify_prompt(prompt: str, local_llm_callable=None) -> str:
         return "code_debugging"
         
     # 2. Code Generation: contains code keywords or is asking to write a program/function/class
+    # Also catches code without 'write': def/function/triple-backtick are strong signals
     if "write a" in prompt_lower or "write python" in prompt_lower or "implement a" in prompt_lower or "create a function" in prompt_lower:
         if code_score > 0 or has_code_block:
+            return "code_generation"
+    # Standalone code-generation signals without 'write'
+    if has_code_block and not debug_score:
+        if re.search(r"\b(generate|create|build|make)\b", prompt_lower) and code_score > 0:
+            return "code_generation"
+    # def / function keywords without a code block still suggest generation
+    if re.search(r"\bdef\s+\w+|\bfunction\s+\w+|\b(write|generate)\s+(a\s+)?(function|method|class|script|program)", prompt_lower):
+        if not debug_score:  # if debug_score > 0 it's already caught above
             return "code_generation"
             
     # 3. Math Reasoning: clear math keywords or mathematical expressions
@@ -171,13 +194,28 @@ async def classify_prompt(prompt: str, local_llm_callable=None) -> str:
     if sentiment_score >= 1 or "sentiment" in prompt_lower:
         return "sentiment_classification"
         
+    # 7. NER — before summarization to handle multi-intent ("extract entities AND summarize")
+    # Prefer NER if the extraction request appears first in the text
+    ner_idx = min(
+        (prompt_lower.find(kw) for kw in ["extract entities", "extract names", "named entities", "identify entities"]
+         if prompt_lower.find(kw) != -1),
+        default=-1
+    )
+    sum_idx = min(
+        (prompt_lower.find(kw) for kw in ["summarize", "summarise", "summary", "tl;dr"]
+         if prompt_lower.find(kw) != -1),
+        default=-1
+    )
+    if ner_score >= 1 or "extract entities" in prompt_lower or "extract names" in prompt_lower:
+        # If both NER and summarize keywords present, prefer the one that appears first
+        if sum_idx != -1 and ner_idx != -1 and sum_idx < ner_idx:
+            pass  # summarize wins if it comes first
+        else:
+            return "named_entity_recognition"
+
     # 6. Summarization
     if summarize_score >= 1 or "summarize" in prompt_lower or "summarise" in prompt_lower:
         return "summarization"
-        
-    # 7. NER
-    if ner_score >= 1 or "extract entities" in prompt_lower or "extract names" in prompt_lower:
-        return "named_entity_recognition"
 
     # 8. Factual Knowledge
     factual_score = len(FACTUAL_KEYWORDS.findall(prompt_lower))

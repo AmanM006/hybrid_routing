@@ -28,6 +28,31 @@ def _fmt(value: float) -> str:
     return result
 
 
+# Word-to-number map for conversational math problems
+_WORD_TO_NUM = {
+    "zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+    "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+    "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14, "fifteen": 15,
+    "sixteen": 16, "seventeen": 17, "eighteen": 18, "nineteen": 19, "twenty": 20,
+    "thirty": 30, "forty": 40, "fifty": 50, "sixty": 60, "seventy": 70,
+    "eighty": 80, "ninety": 90, "hundred": 100,
+}
+
+_WORD_NUM_PATTERN = re.compile(
+    r"\b(zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|"
+    r"thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|"
+    r"thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred)\b",
+    re.IGNORECASE
+)
+
+
+def _words_to_digits(text: str) -> str:
+    """Replace English number words with digits in a string."""
+    def replace_match(m):
+        return str(_WORD_TO_NUM.get(m.group(0).lower(), m.group(0)))
+    return _WORD_NUM_PATTERN.sub(replace_match, text)
+
+
 def _solve_math_deterministically(prompt: str):
     """
     Try to solve a math problem purely with code.
@@ -35,6 +60,20 @@ def _solve_math_deterministically(prompt: str):
     """
     p = prompt.strip()
     pl = p.lower()
+
+    # Convert English number words to digits so all downstream patterns handle
+    # conversational prompts like "twelve apples minus four, how many left?"
+    if _WORD_NUM_PATTERN.search(pl):
+        p_conv = _words_to_digits(p)
+        pl_conv = p_conv.lower()
+        # Only use converted version if it produced new digits
+        if re.search(r"\d", p_conv) and p_conv != p:
+            # Recursively solve using the digit form (avoids code duplication)
+            # Guard: only recurse once (converted text has no word-numbers)
+            result = _solve_math_deterministically(p_conv)
+            if result is not None:
+                logger.info(f"[DETERM-MATH] word-number conversion: '{p}' → '{p_conv}' → {result}")
+                return result
 
     # --- 1. Factorial ----------------------------------------------------------
     # "What is the value of 8 factorial?" / "calculate 8!" / "8 factorial"
@@ -128,10 +167,10 @@ def _solve_math_deterministically(prompt: str):
             return _fmt(result)
 
     # --- 8. Simple arithmetic: "What is X + Y?" / "X - Y" / "X * Y" / "X / Y"
-    # Matches things like "What is 18 + 24?" or "Calculate 100 - 37"
+    # Extended to support negative operands: "What is -3 + 5?" / "What is 18 - 24?"
     m = re.search(
         r"(?:what\s+is|calculate|compute|find|evaluate|solve)[\s:]*"
-        r"(\d+(?:\.\d+)?)\s*([\+\-\*\/×÷])\s*(\d+(?:\.\d+)?)\s*\?",
+        r"(-?\d+(?:\.\d+)?)\s*([\+\-\*\/×÷])\s*(-?\d+(?:\.\d+)?)\s*\?",
         pl
     )
     if m:
@@ -143,6 +182,36 @@ def _solve_math_deterministically(prompt: str):
             return _fmt(result)
         except ZeroDivisionError:
             return None
+
+    # --- 8b. Markdown/inline percentages: "**15%** of 200" / "*15%* of 200"
+    # Strip markdown bold/italic markers before matching percent-of pattern
+    p_stripped = re.sub(r"\*+", "", p)
+    pl_stripped = p_stripped.lower()
+    m = re.search(r"(\d+(?:\.\d+)?)\s*%\s*of\s*(\d+(?:\.\d+)?)", pl_stripped)
+    if m:
+        pct, total = float(m.group(1)), float(m.group(2))
+        result = pct / 100.0 * total
+        logger.info(f"[DETERM-MATH] markdown-stripped {pct}% of {total} = {result}")
+        return _fmt(result)
+
+    # --- 8c. Dollar-off patterns: "$X off of $Y" / "save $X on $Y" / "$X discount on $Y"
+    m_off = re.search(r"\$\s*(\d+(?:\.\d+)?)\s+(?:off(?:\s+of)?|discount\s+on)\s+\$\s*(\d+(?:\.\d+)?)", pl)
+    if m_off:
+        discount = float(m_off.group(1))
+        original = float(m_off.group(2))
+        result = original - discount
+        if result >= 0:
+            logger.info(f"[DETERM-MATH] dollar-off ${original} - ${discount} = ${result}")
+            return _fmt(result)
+
+    m_save = re.search(r"save\s+\$\s*(\d+(?:\.\d+)?)\s+on\s+\$\s*(\d+(?:\.\d+)?)", pl)
+    if m_save:
+        discount = float(m_save.group(1))
+        original = float(m_save.group(2))
+        result = original - discount
+        if result >= 0:
+            logger.info(f"[DETERM-MATH] save dollar ${original} - ${discount} = ${result}")
+            return _fmt(result)
 
     # --- 9. Days × rate problems ----------------------------------------------
     # "If a worker earns $120 per day. How much will they earn in 5 days?"

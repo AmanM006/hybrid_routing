@@ -26,7 +26,7 @@ SYSTEM_PROMPTS = {
         "Answer the question directly and concisely. No preamble."
     ),
     "math_reasoning": (
-        "Solve the math problem. Show minimal steps, end with 'Answer: <value>' on its own line."
+        "Reply with only the final numeric answer."
     ),
     "logical_reasoning": (
         "Solve the logic puzzle. Show minimal steps, end with 'Answer: <value>' on its own line."
@@ -44,20 +44,20 @@ def get_max_tokens(category: str, prompt: str) -> int:
     Returns appropriate max_tokens constraint based on category and prompt constraints.
     """
     if category == "named_entity_recognition":
-        return 120
+        return 80
     elif category == "sentiment_classification":
-        return 55
+        return 40
     elif category == "summarization":
         # Extract word count limits if any
         word_limit_match = re.search(r"(\d+)\s*words?", prompt.lower())
         if word_limit_match:
             limit = int(word_limit_match.group(1))
-            return max(40, limit * 2 + 8)  # rough token conversion
+            return max(40, limit * 2 + 4)  # tighter token conversion
         return 120
     elif category == "factual_knowledge":
         return 80
     elif category in ["math_reasoning", "logical_reasoning"]:
-        return 220
+        return 32
     elif category in ["code_generation", "code_debugging"]:
         return 380
     return 100
@@ -241,10 +241,20 @@ class FireworksClient:
 
         system_prompt = SYSTEM_PROMPTS.get(category, "Answer the user prompt.")
         max_tokens = get_max_tokens(category, prompt)
+
+        # Category-specific user suffix to guide output format
+        _USER_SUFFIXES = {
+            "sentiment_classification": "\n\nLabel the sentiment (Positive/Negative/Neutral/Mixed) and explain in one sentence using 'because'.",
+            "math_reasoning": "\n\nAnswer:",
+            "logical_reasoning": "\n\nAnswer:",
+            "named_entity_recognition": "\n\nOutput JSON only.",
+            "summarization": "\n\nSummary:",
+        }
+        user_suffix = _USER_SUFFIXES.get(category, "\n\nAnswer only.")
         
         messages = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": prompt + "\n\nAnswer only."}
+            {"role": "user", "content": prompt + user_suffix}
         ]
         
         attempts = 5

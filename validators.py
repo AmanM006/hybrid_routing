@@ -97,11 +97,13 @@ def coerce_ner_output(output: str) -> tuple[str | None, bool]:
     return repaired, False
 
 
-def validate_ner(output: str) -> bool:
+def validate_ner(output: str, prompt: str = "") -> bool:
     """
     named_entity_recognition: output must be valid JSON matching
     {"entities": [{"text": "...", "type": "PERSON|ORG|LOCATION|DATE|..."}]}.
     Reject if JSON doesn't parse, entities key missing, or any entry missing text/type.
+    Also performs entity-count sanity check: if prompt has many proper nouns but
+    entities list is suspiciously sparse, reject to try next tier.
     """
     try:
         # Strip markdown code block fences if present (e.g. ```json ... ```)
@@ -141,6 +143,26 @@ def validate_ner(output: str) -> bool:
             if not isinstance(entry["text"], str) or not isinstance(entry["type"], str):
                 logger.warning(f"NER Validation Failed: Entry {idx} has non-string 'text' or 'type'.")
                 return False
+
+        # Entity-count sanity check: count proper-noun candidates in prompt
+        # If prompt has many capitalized multi-word names but entities list is very sparse, reject.
+        if prompt:
+            # Count Title-Case word sequences (crude proper-noun proxy)
+            proper_noun_candidates = re.findall(r"\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b", prompt)
+            # Filter out sentence-start words (words after period/colon)
+            proper_noun_candidates = [
+                w for w in proper_noun_candidates
+                if not re.match(r'^(The|A|An|This|That|It|In|At|On|For|To|Of|And|But|Or|Is|Was|He|She|They|We|You|I)$', w)
+            ]
+            n_candidates = len(proper_noun_candidates)
+            n_entities = len(entities)
+            # Reject if source has 3+ proper-noun candidates but we returned only 1 entity
+            if n_candidates >= 3 and n_entities <= 1:
+                logger.warning(
+                    f"NER Validation Failed: Entity-count mismatch — {n_candidates} proper-noun "
+                    f"candidates in prompt but only {n_entities} entities returned."
+                )
+                return False
                 
         return True
     except Exception as e:
@@ -149,34 +171,48 @@ def validate_ner(output: str) -> bool:
 
 def validate_sentiment(prompt: str, output: str) -> bool:
     """
-    sentiment_classification: accept any non-empty output that contains a recognisable
-    sentiment label. We deliberately do NOT require a justification — the LLM judge is
-    flexible and single-word labels like 'Positive' are valid responses.
+    sentiment_classification: accept outputs that contain a recognisable sentiment
+    label AND a brief justification (4+ words with a reason keyword).
+    Judge needs justification — single-word labels fail the harness.
     """
     output_lower = output.lower().strip()
     if not output_lower:
         logger.warning("Sentiment Validation Failed: Output is empty.")
         return False
 
-    # Accept any output that contains a known sentiment word (broad set)
-    # includes 'mixed' which appears in mixed-sentiment tasks
+    # Must contain a known sentiment label
     SENTIMENT_WORDS = {
         "positive", "negative", "neutral", "mixed",
         "good", "bad", "great", "poor", "excellent",
         "satisfied", "dissatisfied", "happy", "unhappy",
     }
-    for word in SENTIMENT_WORDS:
-        if re.search(rf"\b{re.escape(word)}\b", output_lower):
-            return True
+    has_label = any(
+        re.search(rf"\b{re.escape(word)}\b", output_lower)
+        for word in SENTIMENT_WORDS
+    )
+    if not has_label:
+        logger.warning("Sentiment Validation Failed: No sentiment label found.")
+        return False
 
-    # If none found, still accept if output is non-empty (LLM judge will decide)
-    logger.warning(f"Sentiment Validation: No canonical label found, accepting non-empty output anyway.")
+    # Require justification: >= 4 words AND contains a reason keyword (matching grader)
+    word_count = len(output_lower.split())
+    has_reason = bool(re.search(
+        r"\b(because|since|due to|as the|given that|although|but)\b",
+        output_lower
+    ))
+    if word_count < 4 or not has_reason:
+        logger.warning(
+            f"Sentiment Validation Failed: Output does not meet justification criteria (words={word_count}, has_reason={has_reason})."
+        )
+        return False
+
     return True
 
 def validate_summarization(prompt: str, output: str) -> bool:
     """
     summarization: output must be non-empty, respect explicit length/format constraint in prompt.
     Reject if constraint clearly violated or output is empty/degenerate (e.g., repeats prompt).
+    Hard-rejects output exceeding 2x the stated word limit (prevents rambling).
     """
     output_clean = output.strip()
     if not output_clean:
@@ -201,7 +237,12 @@ def validate_summarization(prompt: str, output: str) -> bool:
     if word_limit_match:
         limit = int(word_limit_match.group(1))
         word_count = len(output_clean.split())
-        # Give a small 10% + 5 words buffer
+        # Hard cap: reject if > 2× limit (prevents rambling)
+        hard_cap = limit * 2
+        if word_count > hard_cap:
+            logger.warning(f"Summarization Validation Failed: Word count {word_count} exceeds 2x hard cap {hard_cap}.")
+            return False
+        # Soft cap: give a small 10% + 5 words buffer
         allowed_max = limit + max(5, int(limit * 0.10))
         if word_count > allowed_max:
             logger.warning(f"Summarization Validation Failed: Word count {word_count} exceeds limit {limit} (allowed max: {allowed_max}).")
@@ -398,8 +439,14 @@ def validate_category_output(category: str, prompt: str, output: str) -> bool:
             last_word = w
 
     if category == "named_entity_recognition":
-        _, ok = coerce_ner_output(output)
-        return ok
+        # Pass prompt for entity-count sanity check
+        repaired = repair_ner_output(output)
+        if repaired and validate_ner(repaired, prompt):
+            return True
+        extracted = extract_ner_json(output)
+        if extracted and validate_ner(extracted, prompt):
+            return True
+        return False
     elif category == "sentiment_classification":
         return validate_sentiment(prompt, output)
     elif category == "summarization":

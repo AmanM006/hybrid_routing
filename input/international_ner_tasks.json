@@ -1,0 +1,10 @@
+[
+  {"task_id": "adv-n01", "prompt": "Extract entities from: François Mitterrand met with Helmut Kohl in München during 1987."},
+  {"task_id": "int-01", "prompt": "Extract entities from: José García visited São Paulo in 2019."},
+  {"task_id": "int-02", "prompt": "Extract entities from: Björk performed in Reykjavík with Sigur Rós."},
+  {"task_id": "int-03", "prompt": "Extract entities from: Angela Merkel met with Emmanuel Macron in Paris."},
+  {"task_id": "int-04", "prompt": "Extract entities from: Zürich-based FIFA held talks in Genève during 2022."},
+  {"task_id": "int-05", "prompt": "Extract entities from: Łódź factory was inspected by Krzysztof Wiśniewski in 2020."},
+  {"task_id": "int-06", "prompt": "Extract entities from: Søren Kierkegaard wrote in København."},
+  {"task_id": "int-07", "prompt": "Extract entities from: Malmö and Göteborg are cities in Sweden."}
+]

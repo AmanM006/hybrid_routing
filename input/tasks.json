@@ -1,37 +1,378 @@
 [
-  {"task_id": "f-new-01", "prompt": "What is the boiling point of water in Celsius?"},
-  {"task_id": "f-new-02", "prompt": "How many sides does a hexagon have?"},
-  {"task_id": "f-new-03", "prompt": "What planet is closest to the Sun?"},
-  {"task_id": "f-new-04", "prompt": "Who wrote Romeo and Juliet?"},
-
-  {"task_id": "m-new-01", "prompt": "A car travels at 90 km per hour. How many kilometers does it cover in 2.5 hours?"},
-  {"task_id": "m-new-02", "prompt": "What is the value of 8 factorial?"},
-  {"task_id": "m-new-03", "prompt": "A rectangle has a width of 7 cm and a length of 11 cm. What is its area in square centimeters?"},
-  {"task_id": "m-new-04", "prompt": "A store sells apples for $0.75 each. How much do 16 apples cost in total?"},
-
-  {"task_id": "s-new-01", "prompt": "Classify the sentiment of this review: The battery life is disappointing and the screen scratches far too easily."},
-  {"task_id": "s-new-02", "prompt": "Classify the sentiment of this text: The staff were incredibly helpful and went above and beyond expectations."},
-  {"task_id": "s-new-03", "prompt": "Classify the sentiment of this review: The hotel room was clean and the location was convenient, though the noise level was a bit high."},
-  {"task_id": "s-new-04", "prompt": "Classify the sentiment of this statement: I neither liked nor disliked the presentation; it was fairly average."},
-
-  {"task_id": "sum-new-01", "prompt": "Summarize in one sentence: Photosynthesis is the process by which green plants and some other organisms use sunlight, water, and carbon dioxide to produce food and oxygen."},
-  {"task_id": "sum-new-02", "prompt": "Summarize in one sentence: The Internet of Things (IoT) refers to the network of physical devices embedded with sensors, software, and connectivity that enables them to collect and exchange data with other systems over the internet."},
-  {"task_id": "sum-new-03", "prompt": "Summarize in one sentence: Inflation is the rate at which the general level of prices for goods and services rises over time, eroding purchasing power and often prompting central banks to raise interest rates."},
-
-  {"task_id": "n-new-01", "prompt": "Extract all named entities and their types from: Elon Musk founded SpaceX in Hawthorne, California in 2002."},
-  {"task_id": "n-new-02", "prompt": "Extract all named entities and their types from: The Nobel Peace Prize was awarded to Malala Yousafzai in Oslo, Norway in 2014."},
-  {"task_id": "n-new-03", "prompt": "Extract all named entities and their types from: Apple Inc. released the first iPhone in January 2007 under CEO Steve Jobs."},
-
-  {"task_id": "d-new-01", "prompt": "This function should compute the factorial of n but has a bug: def factorial(n): return n * factorial(n). Find and fix it."},
-  {"task_id": "d-new-02", "prompt": "This function should return the largest element in a list but has a bug: def get_max(lst): return min(lst). Find and fix it."},
-  {"task_id": "d-new-03", "prompt": "This function should check if a string is a palindrome but has a bug: def is_palindrome(s): return s == s. Find and fix it."},
-
-  {"task_id": "l-new-01", "prompt": "Every mammal is warm-blooded. A dolphin is a mammal. Is a dolphin warm-blooded? Answer yes or no."},
-  {"task_id": "l-new-02", "prompt": "Anna is faster than Ben. Ben is faster than Carlos. Is Anna faster than Carlos? Answer yes or no."},
-  {"task_id": "l-new-03", "prompt": "A bag contains 5 white marbles and 3 black marbles. What is the minimum number of marbles you must draw to guarantee at least one black marble?"},
-  {"task_id": "l-new-04", "prompt": "If the power goes out, the lights turn off. The lights are on. Did the power go out? Answer yes or no."},
-
-  {"task_id": "c-new-01", "prompt": "Write a Python function that takes a list of strings and returns only those with more than 5 characters."},
-  {"task_id": "c-new-02", "prompt": "Write a Python function that takes a number and returns True if it is a perfect square, False otherwise."},
-  {"task_id": "c-new-03", "prompt": "Write a Python function that flattens a nested list one level deep (e.g. [[1,2],[3,4]] becomes [1,2,3,4])."}
+  {
+    "task_id": "s-m01",
+    "prompt": "A car travels at 90 km per hour. How many kilometers does it cover in 2.5 hours?"
+  },
+  {
+    "task_id": "s-m02",
+    "prompt": "What is the value of 8 factorial?"
+  },
+  {
+    "task_id": "s-m03",
+    "prompt": "A rectangle has a width of 7 cm and a length of 11 cm. What is its area in square centimeters?"
+  },
+  {
+    "task_id": "s-m04",
+    "prompt": "A store sells apples for $0.75 each. How much do 16 apples cost in total?"
+  },
+  {
+    "task_id": "s-m05",
+    "prompt": "A store has 240 items. It sells 15% on Monday and 60 more on Tuesday. How many items remain?"
+  },
+  {
+    "task_id": "s-m06",
+    "prompt": "What is 15% of 200?"
+  },
+  {
+    "task_id": "s-m07",
+    "prompt": "What is 25% of 80?"
+  },
+  {
+    "task_id": "s-m08",
+    "prompt": "What is 18 + 24?"
+  },
+  {
+    "task_id": "s-m09",
+    "prompt": "A triangle has a base of 6 and a height of 4. What is its area?"
+  },
+  {
+    "task_id": "s-m10",
+    "prompt": "If a worker earns $120 per day, how much will they earn in 5 days?"
+  },
+  {
+    "task_id": "s-m11",
+    "prompt": "Explain the quadratic formula."
+  },
+  {
+    "task_id": "s-m12",
+    "prompt": "Solve the differential equation dy/dx = 2x."
+  },
+  {
+    "task_id": "s-m13",
+    "prompt": "What is the sum of all prime numbers below 100?"
+  },
+  {
+    "task_id": "s-n01",
+    "prompt": "Extract all named entities and their types from: Elon Musk founded SpaceX in Hawthorne, California in 2002."
+  },
+  {
+    "task_id": "s-n02",
+    "prompt": "Extract all named entities and their types from: The Nobel Peace Prize was awarded to Malala Yousafzai in Oslo, Norway in 2014."
+  },
+  {
+    "task_id": "s-n03",
+    "prompt": "Extract all named entities and their types from: Apple Inc. released the first iPhone in January 2007 under CEO Steve Jobs."
+  },
+  {
+    "task_id": "s-n04",
+    "prompt": "Who is the current president of France?"
+  },
+  {
+    "task_id": "s-n05",
+    "prompt": "Summarize this text about entities."
+  },
+  {
+    "task_id": "e-m01",
+    "prompt": "A price of 200 increased by 15%. What is the new price?"
+  },
+  {
+    "task_id": "e-m02",
+    "prompt": "500 increased by 10%. What is the result?"
+  },
+  {
+    "task_id": "e-m03",
+    "prompt": "120 decreased by 25%. What is the result?"
+  },
+  {
+    "task_id": "e-m04",
+    "prompt": "80 reduced by 50%. What is the value?"
+  },
+  {
+    "task_id": "e-m05",
+    "prompt": "What is the average of 10, 20, and 30?"
+  },
+  {
+    "task_id": "e-m06",
+    "prompt": "Find the mean of 4, 8, 12, and 16."
+  },
+  {
+    "task_id": "e-m07",
+    "prompt": "Solve for x: 2x + 3 = 11"
+  },
+  {
+    "task_id": "e-m08",
+    "prompt": "If 3x - 6 = 9, what is x?"
+  },
+  {
+    "task_id": "e-m09",
+    "prompt": "5x = 25. What is x?"
+  },
+  {
+    "task_id": "e-m10",
+    "prompt": "What is 0 factorial?"
+  },
+  {
+    "task_id": "e-m11",
+    "prompt": "What is 0% of 500?"
+  },
+  {
+    "task_id": "e-m12",
+    "prompt": "What is the average of 0 and 100?"
+  },
+  {
+    "task_id": "e-m13",
+    "prompt": "Solve x^2 + 3x - 10 = 0"
+  },
+  {
+    "task_id": "e-m14",
+    "prompt": "Solve dy/dx = 2x + 1 with y(0) = 0"
+  },
+  {
+    "task_id": "e-m15",
+    "prompt": "What is the sum of all prime numbers below 50?"
+  },
+  {
+    "task_id": "e-n01",
+    "prompt": "Extract all named entities from: Satya Nadella is the CEO of Microsoft in Redmond, Washington."
+  },
+  {
+    "task_id": "e-n02",
+    "prompt": "Extract all named entities and their types from: Jeff Bezos founded Amazon in Seattle in 1994."
+  },
+  {
+    "task_id": "e-n03",
+    "prompt": "Extract all named entities from: NASA launched the Mars Rover mission in July 2020."
+  },
+  {
+    "task_id": "e-n04",
+    "prompt": "Extract named entities from: Marie Curie won the Nobel Prize in Physics in Paris in 1903."
+  },
+  {
+    "task_id": "e-n05",
+    "prompt": "Extract all named entities from: Sam Altman announced GPT at OpenAI in San Francisco."
+  },
+  {
+    "task_id": "e-n06",
+    "prompt": "Find all named entities in: Elon Musk co-founded Tesla Inc. in 2003 in San Carlos, California."
+  },
+  {
+    "task_id": "e-n07",
+    "prompt": "Who is the president of France?"
+  },
+  {
+    "task_id": "e-n08",
+    "prompt": "Classify the sentiment of: Apple is a great company."
+  },
+  {
+    "task_id": "e-n09",
+    "prompt": "Summarize this text: Barack Obama was born in Hawaii."
+  },
+  {
+    "task_id": "e-n10",
+    "prompt": "Write a Python function to extract named entities."
+  },
+  {
+    "task_id": "e-n11",
+    "prompt": "Extract all named entities from: Paris is beautiful."
+  },
+  {
+    "task_id": "e-n12",
+    "prompt": "Extract named entities from: Will Smith slapped Chris Rock at the Oscars in Hollywood in 2022."
+  },
+  {
+    "task_id": "e-n13",
+    "prompt": "Extract named entities: Meta Corp reported earnings for Q3 in Menlo Park, California in October 2023."
+  },
+  {
+    "task_id": "e-n14",
+    "prompt": "Extract named entities: The WHO held its annual summit in Geneva in June 2024."
+  },
+  {
+    "task_id": "e-n15",
+    "prompt": "Extract all named entities: The BBC broadcast the London Marathon in April 2023."
+  },
+  {
+    "task_id": "e-l01",
+    "prompt": "Sam, Jo, and Lee each own one of: cat, dog, bird. Sam does not own the bird. Jo owns the dog. Who owns the cat?"
+  },
+  {
+    "task_id": "e-l02",
+    "prompt": "Alice, Bob, and Carol each like one of: red, blue, green. Alice likes red. Bob does not like blue. Who likes green?"
+  },
+  {
+    "task_id": "e-l03",
+    "prompt": "Mike, Sara, and Tom each play one of: tennis, soccer, basketball. Mike plays tennis. Sara does not play soccer. Who plays basketball?"
+  },
+  {
+    "task_id": "e-l04",
+    "prompt": "Sam, Jo, and Lee each own one of: cat, dog, bird. Sam does not own the bird. Jo owns the dog. What does Sam own?"
+  },
+  {
+    "task_id": "e-l05",
+    "prompt": "Alice, Bob, Carol, and Dan each drink one of: tea, coffee, juice, water. Alice drinks tea. Bob drinks coffee. Carol does not drink juice. Who drinks juice?"
+  },
+  {
+    "task_id": "e-l06",
+    "prompt": "Every mammal is warm-blooded. A dolphin is a mammal. Is a dolphin warm-blooded? Answer yes or no."
+  },
+  {
+    "task_id": "e-l07",
+    "prompt": "Anna is faster than Ben. Ben is faster than Carlos. Is Anna faster than Carlos? Answer yes or no."
+  },
+  {
+    "task_id": "e-l08",
+    "prompt": "If the power goes out, the lights turn off. The lights are on. Did the power go out? Answer yes or no."
+  },
+  {
+    "task_id": "e-l09",
+    "prompt": "A bag contains 5 white marbles and 3 black marbles. What is the minimum number of marbles you must draw to guarantee at least one black marble?"
+  },
+  {
+    "task_id": "e-l10",
+    "prompt": "Sam, Jo, and Lee each own one of: cat, dog, bird. Sam does not own the cat. Who owns the dog?"
+  },
+  {
+    "task_id": "e-l11",
+    "prompt": "Sam, Jo, and Lee each own one of: cat, dog, bird. Sam owns the cat. Sam does not own the cat. Jo owns the dog. Who owns the bird?"
+  },
+  {
+    "task_id": "e-l12",
+    "prompt": "A bag has 3 red and 2 blue balls. What is the probability of drawing red? Who gets the prize?"
+  },
+  {
+    "task_id": "e-l13",
+    "prompt": "Sam, Jo, and Lee each own one of: cat, dog, bird. Sam does not own the bird. Jo owns the dog."
+  },
+  {
+    "task_id": "e-l14",
+    "prompt": "Every mammal is warm-blooded. A dolphin is a mammal. Is a dolphin warm-blooded? Answer yes or no."
+  },
+  {
+    "task_id": "e-l15",
+    "prompt": "If the power goes out, the lights turn off. The lights are on. Did the power go out? Answer yes or no."
+  },
+  {
+    "task_id": "st-m01",
+    "prompt": "A store marks down an $80 jacket by 25%. What is the sale price?"
+  },
+  {
+    "task_id": "st-m02",
+    "prompt": "What is the average of 5, 10, and 15? Index number 99."
+  },
+  {
+    "task_id": "st-m03",
+    "prompt": "Tom has 3 apples, buys 12 more, then eats 7. How many apples does he have?"
+  },
+  {
+    "task_id": "st-m04",
+    "prompt": "What is 50% off of $120?"
+  },
+  {
+    "task_id": "st-m05",
+    "prompt": "twelve minus four equals what?"
+  },
+  {
+    "task_id": "st-s01",
+    "prompt": "Classify sentiment (positive/negative/neutral): Stunning lobby and friendly staff, but mildew smell and broken shower."
+  },
+  {
+    "task_id": "st-s02",
+    "prompt": "Classify sentiment: The package arrived on Tuesday."
+  },
+  {
+    "task_id": "st-n01",
+    "prompt": "Extract entities: Paris Hilton attended Paris Fashion Week in Paris, France."
+  },
+  {
+    "task_id": "st-n02",
+    "prompt": "Extract entities: Amazon announced profits while the Amazon river flooded Brazil."
+  },
+  {
+    "task_id": "st-n03",
+    "prompt": "Extract entities: John Doe works at TechCorp in Tokyo."
+  },
+  {
+    "task_id": "st-c01",
+    "prompt": "Bug: binary search returns wrong index when target is last element:\ndef bs(a, t):\n    lo, hi = 0, len(a)-1\n    while lo < hi:\n        mid = (lo+hi)//2\n        if a[mid] < t: lo = mid+1\n        else: hi = mid\n    return lo\nFix it."
+  },
+  {
+    "task_id": "st-c02",
+    "prompt": "Bug: append to list uses same object every call:\ndef add_item(item, bucket=[]):\n    bucket.append(item)\n    return bucket\nFix mutable default."
+  },
+  {
+    "task_id": "st-g01",
+    "prompt": "Write Python: return nth Fibonacci number iteratively (n>=0)."
+  },
+  {
+    "task_id": "adv-m01",
+    "prompt": "Hey, so my friend was wondering \u2014 if someone bought twelve apples and then gave away four, how many would they have left? Just the number please."
+  },
+  {
+    "task_id": "adv-s01",
+    "prompt": "Classify the sentiment (positive/negative/neutral): The hotel lobby was stunning and the staff greeted us warmly, but our room smelled of mildew and the shower barely worked."
+  },
+  {
+    "task_id": "adv-l01",
+    "prompt": "Sam, Jo, and Lee each own one of: cat, dog, bird. Jo owns the dog. Sam does not own the bird. The weather was sunny that day. Who owns the cat?"
+  },
+  {
+    "task_id": "adv-x01",
+    "prompt": "Extract all named entities from this text AND summarize it in one sentence: Satya Nadella announced new AI features at Microsoft headquarters in Redmond."
+  },
+  {
+    "task_id": "adv-n01",
+    "prompt": "Extract entities from: Fran\u00e7ois Mitterrand met with Helmut Kohl in M\u00fcnchen during 1987."
+  },
+  {
+    "task_id": "adv-m02",
+    "prompt": "What is -15 + 27?"
+  },
+  {
+    "task_id": "adv-m03",
+    "prompt": "What is 100 divided by 0?"
+  },
+  {
+    "task_id": "adv-m04",
+    "prompt": "What is 0% of 500?"
+  },
+  {
+    "task_id": "adv-d01",
+    "prompt": "This function should return the last element but has a bug:\ndef last(items):\n    for i in range(len(items)):\n        return items[i]\nFind and fix it."
+  },
+  {
+    "task_id": "adv-f01",
+    "prompt": "What is the boiling point of water at sea level in Celsius?"
+  },
+  {
+    "task_id": "adv-sum01",
+    "prompt": "Summarize in exactly 1 sentence: The James Webb Space Telescope launched in 2021 and captures infrared images of distant galaxies."
+  },
+  {
+    "task_id": "adv-m05",
+    "prompt": "A store marks down a $80 jacket by 25%. What is the sale price?"
+  },
+  {
+    "task_id": "adv-l02",
+    "prompt": "All roses are flowers. Some flowers fade quickly. Can we conclude all roses fade quickly? Answer yes or no."
+  },
+  {
+    "task_id": "adv-n02",
+    "prompt": "Extract entities from: iPhone sales rose after Apple Inc. CEO Tim Cook spoke in Cupertino."
+  },
+  {
+    "task_id": "adv-c01",
+    "prompt": "Write a Python function that returns True if a string is a palindrome."
+  },
+  {
+    "task_id": "adv-m06",
+    "prompt": "Solve for x: 4x - 8 = 12"
+  },
+  {
+    "task_id": "adv-s02",
+    "prompt": "Classify sentiment: Best product ever!!! Though shipping took forever."
+  },
+  {
+    "task_id": "adv-m07",
+    "prompt": "What is the average of 12, 18, and 30?"
+  }
 ]
