@@ -26,7 +26,7 @@ SYSTEM_PROMPTS = {
         "Answer the question directly and concisely. No preamble."
     ),
     "math_reasoning": (
-        "Reply with only the final numeric answer."
+        "Solve the math problem. Show minimal steps, end with 'Answer: <value>' on its own line."
     ),
     "logical_reasoning": (
         "Solve the logic puzzle. Show minimal steps, end with 'Answer: <value>' on its own line."
@@ -44,20 +44,22 @@ def get_max_tokens(category: str, prompt: str) -> int:
     Returns appropriate max_tokens constraint based on category and prompt constraints.
     """
     if category == "named_entity_recognition":
-        return 80
+        return 120
     elif category == "sentiment_classification":
-        return 40
+        return 55
     elif category == "summarization":
         # Extract word count limits if any
         word_limit_match = re.search(r"(\d+)\s*words?", prompt.lower())
         if word_limit_match:
             limit = int(word_limit_match.group(1))
-            return max(40, limit * 2 + 4)  # tighter token conversion
+            return max(40, limit * 2 + 8)
         return 120
     elif category == "factual_knowledge":
         return 80
-    elif category in ["math_reasoning", "logical_reasoning"]:
-        return 32
+    elif category == "math_reasoning":
+        return 120
+    elif category == "logical_reasoning":
+        return 220
     elif category in ["code_generation", "code_debugging"]:
         return 380
     return 100

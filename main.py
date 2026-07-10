@@ -584,10 +584,11 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
                     answer = get_emergency_fallback(category, prompt)
 
             elif category == "sentiment_classification":
-                # P3: cheap → mid → emergency (no reasoning, no code)
+                # Accuracy-first: mid → reasoning → cheap (no code). v23 cheap-only regressed.
                 for tier_name, role_key, timeout in [
-                    ("cheap-remote", "cheap", 9.0),
                     ("mid-fallback", "mid", 10.0),
+                    ("reasoning-fallback", "reasoning", 12.0),
+                    ("cheap-fallback", "cheap", 9.0),
                 ]:
                     model = roles.get(role_key)
                     if not model or validation_pass:
@@ -613,10 +614,10 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
 
             elif category == "named_entity_recognition":
                 best_raw = ""
-                # P0/P1: mid first (cheap tokens), then reasoning; no code model
+                # Accuracy-first NER: reasoning → mid → cheap (no code). Mid-first hurt v23.
                 ner_tiers = [
-                    ("mid-fallback", roles.get("mid"), 12.0),
                     ("direct-remote", roles.get("reasoning"), 14.0),
+                    ("mid-fallback", roles.get("mid"), 12.0),
                     ("cheap-fallback", roles.get("cheap"), 10.0),
                 ]
                 seen_models = set()
