@@ -44,11 +44,12 @@ docker run \
   video-caption-agent
 ```
 
-## Submission
-
+**Submission image:**
 ```
 ghcr.io/amanm006/video_captioning-v1:v1
 ```
+
+Publish tag: `git tag track2-v1 && git push origin track2-v1`
 
 Package must be **Public** on GitHub Packages.
 
