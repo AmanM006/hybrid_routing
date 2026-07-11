@@ -148,7 +148,7 @@ class TestGeneralPurposeAgent(unittest.IsolatedAsyncioTestCase):
         for prompt in prompts:
             self.assertEqual(await classify_prompt(prompt), "named_entity_recognition")
 
-    async def test_summarization_not_math_with_percent(self):
+    async def test_summarization_before_math_with_percent_in_source(self):
         prompt = (
             "Summarize for a busy manager (under 20 words): Our Q3 revenue rose 8% "
             "year-over-year driven by enterprise subscriptions, while consumer churn ticked up slightly."
@@ -242,17 +242,12 @@ class TestGeneralPurposeAgent(unittest.IsolatedAsyncioTestCase):
             {"text": "Wimbledon", "type": "EVENT"},
             event_entities,
         )
-        self.assertIsNotNone(solve_ner_deterministically(
-            "Can you extract named entities from this customer note? "
-            "Dr. Anya Sharma at Mayo Clinic in Rochester prescribed Lisinopril on March 3, 2024."
-        ))
+        # Lisinopril is not in _KNOWN_PRODUCTS — partial deterministic must fall through.
         clinic_result = solve_ner_deterministically(
             "Can you extract named entities from this customer note? "
             "Dr. Anya Sharma at Mayo Clinic in Rochester prescribed Lisinopril on March 3, 2024."
         )
-        clinic_entities = {e["text"] for e in json.loads(clinic_result)["entities"]}
-        self.assertIn("Lisinopril", clinic_entities)
-        self.assertIn("Mayo Clinic", clinic_entities)
+        self.assertIsNone(clinic_result)
 
         repaired, ok = coerce_ner_output(
             "**People:** Sundar Pichai\n"

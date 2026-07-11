@@ -17,9 +17,9 @@ _fireworks_task_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
 # Category instructions — kept lean for token efficiency
 SYSTEM_PROMPTS = {
     "named_entity_recognition": (
-        "Return ONLY valid JSON: "
-        '{"entities":[{"text":"...","type":"PERSON|ORG|LOCATION|DATE|MONEY|PERCENT|PRODUCT|EVENT"}]}. '
-        "No markdown, bullets, headings, or prose."
+        "Extract entities from the text. Output raw JSON only: "
+        '{"entities": [{"text": "...", "type": "PERSON|ORG|LOCATION|DATE|..."}]}. '
+        "No markdown, no preamble."
     ),
     "sentiment_classification": (
         "Classify sentiment (positive/negative/neutral/mixed). "
@@ -399,8 +399,8 @@ class FireworksClient:
             "code_debugging": "\n\nReturn one corrected ```python code block only. No explanation.",
             "code_generation": "\n\nReturn one ``` code block only. No explanation.",
             "named_entity_recognition": (
-                "\n\nJSON only — no markdown, bullets, or prose. "
-                '{"entities":[{"text":"...","type":"..."}]}'
+                "\n\nReturn every named person, organization, location, event, product, and date. "
+                "Output only {\"entities\":[{\"text\":\"...\",\"type\":\"...\"}]} JSON."
             ),
             "summarization": "\n\nSummary:",
         }

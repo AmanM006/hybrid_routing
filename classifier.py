@@ -95,26 +95,23 @@ async def classify_prompt(prompt: str, local_llm_callable=None) -> str:
     if re.search(r"minimum.*(?:guarantee|certain|sure)|guarantee.*minimum|must draw|to guarantee|minimum number", prompt_lower):
         return "logical_reasoning"
 
-    # NER before math — extraction prompts often contain numbers (%, $, dates).
-    if re.search(
-        r"\b(extract|identify|list|pull out|find)\b.{0,50}\b(entities|names|people|places|organizations|organisations|dates)\b",
-        prompt_lower,
-    ) or re.search(r"\bner\b", prompt_lower):
-        return "named_entity_recognition"
-
-    # Summarization before math — summary source text often contains % and metrics.
-    if re.search(
-        r"\b(summarize|summarise|summary|tl;dr|tldr|condense|gist|brief overview)\b",
-        prompt_lower,
-    ):
-        return "summarization"
-
     # Probability puzzles (coin/dice/independence) are logic, not arithmetic word problems.
     if re.search(r"\bprobability\b", prompt_lower) and re.search(
         r"\b(coin|flip|dice|roll|heads|tails|fair|independent|next flip|gambler)\b",
         prompt_lower,
     ):
         return "logical_reasoning"
+
+    # Summarization before math — only when the prompt explicitly asks to summarize
+    # (source text may contain %/metrics). Skip if it's clearly a math question.
+    if re.search(
+        r"\b(summarize|summarise|summary|tl;dr|tldr|condense|gist|brief overview)\b",
+        prompt_lower,
+    ) and not re.search(
+        r"\b(how many|how much|calculate|solve for|solve the|what is\s+\d+\s*%?\s*of)\b",
+        prompt_lower,
+    ):
+        return "summarization"
 
     # High-priority math — before propositional "if...then" (word problems often say "if someone bought...")
     has_math_pattern = (

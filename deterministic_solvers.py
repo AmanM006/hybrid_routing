@@ -342,11 +342,8 @@ _KNOWN_ORGS = {
 }
 
 # Well-known product names (not orgs)
-_KNOWN_PRODUCTS = {
-    "iphone", "android", "windows", "macos", "linux", "ios",
-    "chatgpt", "gpt", "gemini", "pixel", "galaxy", "kindle",
-    "lisinopril", "aspirin", "ibuprofen", "metformin", "insulin", "ozempic",
-}
+_KNOWN_PRODUCTS = {"iphone", "android", "windows", "macos", "linux", "ios",
+                   "chatgpt", "gpt", "gemini", "pixel", "galaxy", "kindle"}
 
 _KNOWN_EVENTS = {
     "nobel peace prize", "nobel prize", "wimbledon", "olympics",
@@ -524,38 +521,10 @@ def _extract_orgs(text: str):
         candidate = m.group(1).strip().rstrip(".")
         if candidate and candidate not in orgs:
             orgs.append(candidate)
-    # Industry-style multi-word orgs: "Acme Robotics", "BrightPath Analytics"
-    for m in re.finditer(
-        r"\b([A-Z][A-Za-z0-9]+(?:\s+[A-Z][A-Za-z0-9]+)?\s+"
-        r"(?:Robotics|Analytics|Technologies|Systems|Labs|Ventures|Holdings|Media|Studios|Bank))\b",
-        text,
-    ):
-        candidate = m.group(1).strip()
-        if candidate not in orgs:
-            orgs.append(candidate)
     # Known standalone org names (case-insensitive lookup but preserve original case)
     for word in re.findall(r"\b[A-Za-z][A-Za-z0-9]+\b", text):
         if word.lower() in _KNOWN_ORGS and word not in orgs:
             orgs.append(word)
-    # Multi-word orgs without suffix: "Goldman Sachs", "Mayo Clinic" (Clinic via suffix above)
-    for m in re.finditer(
-        r"\b([A-Z][A-Za-z0-9]+(?:\s+[A-Z][A-Za-z0-9]+){1,2})\b",
-        text,
-    ):
-        candidate = m.group(1).strip()
-        low = candidate.lower()
-        if low in _KNOWN_ORGS or low in _KNOWN_LOCATIONS:
-            if candidate not in orgs and low in _KNOWN_ORGS:
-                orgs.append(candidate)
-            continue
-        # "X Y Corp" style already handled; skip if looks like person (two words, no org cue)
-        if re.search(_ORG_SUFFIXES + r"$", candidate):
-            continue
-        if low in _KNOWN_LOCATIONS:
-            continue
-        if re.search(r"\b(?:at|from|joined|founded|acquired)\s+" + re.escape(candidate), text, re.I):
-            if candidate not in orgs:
-                orgs.append(candidate)
     return list(dict.fromkeys(orgs))
 
 
@@ -580,14 +549,6 @@ def _extract_locations(text: str):
             original = text[m.start():m.end()]
             if original not in locations:
                 locations.append(original)
-    # Compound locations: "San Francisco", "New York" from prep + multi-word
-    for m in re.finditer(
-        rf"{_LOC_PREPS}((?:[A-ZÀ-ÖØ-Þ][a-zà-öø-ÿ]+\s+){{1,2}}[A-ZÀ-ÖØ-Þ][a-zà-öø-ÿ]+)\b",
-        text,
-    ):
-        candidate = m.group(1).strip()
-        if candidate.lower() not in _KNOWN_ORGS and candidate not in locations:
-            locations.append(candidate)
     return list(dict.fromkeys(locations))
 
 
@@ -629,13 +590,6 @@ def _solve_ner_deterministically(prompt: str):
         for m in re.finditer(rf"\b{re.escape(event)}\b", source_lower):
             events.append(source_text[m.start():m.end()])
 
-    money = [m.group(0).strip() for m in _MONEY_RE.finditer(source_text)]
-    percents = [m.group(0).strip() for m in _PERCENT_RE.finditer(source_text)]
-    relative_dates = [m.group(0).strip() for m in _RELATIVE_DATE_RE.finditer(source_text)]
-    for rd in relative_dates:
-        if rd not in dates:
-            dates.append(rd)
-
     # Correct common regex ambiguities before assembling output.
     known_location_lower = {loc.lower() for loc in _KNOWN_LOCATIONS}
     event_lower = {event.lower() for event in events}
@@ -672,10 +626,6 @@ def _solve_ner_deterministically(prompt: str):
         entities.append({"text": pr, "type": "PRODUCT"})
     for event in events:
         entities.append({"text": event, "type": "EVENT"})
-    for mo in money:
-        entities.append({"text": mo, "type": "MONEY"})
-    for pc in percents:
-        entities.append({"text": pc, "type": "PERCENT"})
 
     if len(entities) < 2:
         logger.info(f"[DETERM-NER] Too few entities ({len(entities)}) — falling through to LLM.")
@@ -688,7 +638,6 @@ def _solve_ner_deterministically(prompt: str):
     ignored = {
         "the", "after", "from", "can", "dr", "ceo", "ner", "task",
         "index", "q", "extract", "identify", "list", "find",
-        "revenue", "cost", "profit", "sales", "price", "growth", "launch",
     }
     unexplained = []
     for token in re.findall(r"\b[A-ZÀ-ÖØ-Þ][A-Za-zÀ-ÖØ-öø-ÿ'-]{2,}\b", source_text):

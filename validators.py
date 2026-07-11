@@ -144,10 +144,7 @@ def validate_ner(output: str, prompt: str = "") -> bool:
         if start == -1 or end == -1 or end < start:
             logger.warning("NER Validation Failed: No curly braces found.")
             return False
-        preamble = stripped[:start].strip()
-        if preamble and not preamble.lower().startswith("json"):
-            logger.warning("NER Validation Failed: Prose preamble before JSON.")
-            return False
+
         json_str = stripped[start:end+1]
         data = json.loads(json_str)
         
@@ -531,13 +528,7 @@ def validate_category_output(category: str, prompt: str, output: str) -> bool:
     elif category in ["math_reasoning", "logical_reasoning"]:
         return validate_reasoning(output)
     elif category == "code_generation":
-        coerced = coerce_code_output(output)
-        if coerced:
-            output = coerced
         return validate_code(prompt, output, is_debugging=False)
     elif category == "code_debugging":
-        coerced = coerce_code_output(output)
-        if coerced:
-            output = coerced
         return validate_code(prompt, output, is_debugging=True)
     return True
