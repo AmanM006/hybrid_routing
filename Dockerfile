@@ -27,7 +27,7 @@ RUN curl -L -o /tmp/llama.zip https://github.com/ggml-org/llama.cpp/releases/dow
     cp /tmp/llama_extracted/build/bin/llama-server /build/llama-server && \
     chmod +x /build/llama-server
 
-# Download local model file (Qwen2.5-1.5B q4 — proven on 4GB RAM grading env)
+# Download local model file
 RUN mkdir -p models && \
     curl -L -o models/qwen2.5-1.5b-instruct-q4_k_m.gguf https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf
 

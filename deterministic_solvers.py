@@ -245,47 +245,6 @@ def _solve_math_deterministically(prompt: str):
         logger.info(f"[DETERM-MATH] {base} decreased by {pct}% = {result}")
         return _fmt(result)
 
-    # --- 10b. Percent discount on a price: "$95 jacket ... 20% off at checkout"
-    m_disc = re.search(
-        r"\$\s*(\d+(?:\.\d+)?).{0,100}?(\d+(?:\.\d+)?)\s*%\s*(?:off|discount)",
-        pl,
-    )
-    if m_disc:
-        price = float(m_disc.group(1))
-        pct = float(m_disc.group(2))
-        result = price * (1 - pct / 100.0)
-        logger.info(f"[DETERM-MATH] ${price} with {pct}% off = {result}")
-        return _fmt(result)
-    m_disc_rev = re.search(
-        r"(\d+(?:\.\d+)?)\s*%\s*(?:off|discount).{0,100}?\$\s*(\d+(?:\.\d+)?)",
-        pl,
-    )
-    if m_disc_rev:
-        pct = float(m_disc_rev.group(1))
-        price = float(m_disc_rev.group(2))
-        result = price * (1 - pct / 100.0)
-        logger.info(f"[DETERM-MATH] ${price} with {pct}% off = {result}")
-        return _fmt(result)
-
-    # --- 10c. Fraction scaling: "2/3 cup ... triple the batch"
-    m_frac = re.search(r"(\d+)\s*/\s*(\d+)\s+\w+", pl)
-    m_scale = re.search(r"\b(triple|double|quadruple|(\d+)\s*times)\b", pl)
-    if m_frac and m_scale:
-        num, den = int(m_frac.group(1)), int(m_frac.group(2))
-        if den != 0:
-            scale_word = m_scale.group(1)
-            scale_map = {"double": 2, "triple": 3, "quadruple": 4}
-            if scale_word in scale_map:
-                mult = scale_map[scale_word]
-            elif m_scale.group(2):
-                mult = int(m_scale.group(2))
-            else:
-                mult = None
-            if mult is not None:
-                result = (num / den) * mult
-                logger.info(f"[DETERM-MATH] {num}/{den} * {mult} = {result}")
-                return _fmt(result)
-
     # "X% increase over Y" / "X% more than Y"
     m_pct_more = re.search(r"(\d+(?:\.\d+)?)\s*%\s+(?:increase|more)\s+(?:over|than)\s+(\d+(?:\.\d+)?)", pl)
     if m_pct_more:
@@ -375,32 +334,21 @@ _KNOWN_ORGS = {
     "spacex", "tesla", "google", "amazon", "microsoft", "apple", "meta",
     "openai", "nasa", "nato", "un", "who", "imf", "cnn", "bbc",
     "facebook", "twitter", "netflix", "uber", "lyft", "airbnb",
-    "alphabet", "stanford", "harvard", "mit", "ibm", "oracle", "samsung",
-    "sony", "nvidia", "intel", "boeing", "lockheed", "goldman sachs",
-    "jp morgan", "jpmorgan", "morgan stanley", "bank of america",
-    "wells fargo", "new york times", "wall street journal", "mayo clinic",
-    "stripe", "pfizer", "fda", "world bank",
 }
 
 # Well-known product names (not orgs)
 _KNOWN_PRODUCTS = {"iphone", "android", "windows", "macos", "linux", "ios",
-                   "chatgpt", "gpt", "gemini", "pixel", "galaxy", "kindle",
-                   "lisinopril"}
+                   "chatgpt", "gpt", "gemini", "pixel", "galaxy", "kindle"}
 
 _KNOWN_EVENTS = {
     "nobel peace prize", "nobel prize", "wimbledon", "olympics",
     "world cup", "london marathon", "paris fashion week",
 }
 
-_ORG_SUFFIXES = (
-    r"(?:Inc\.?|Corp\.?|Ltd\.?|LLC|Co\.?|Group|Foundation|Institute|"
-    r"University|College|School|Hospital|Clinic|Bank|Trust|Fund|Labs?|"
-    r"Technologies|Tech|Systems|Services|Partners|Associates|"
-    r"International|Global|Agency|Authority|Association|Society)"
-)
+_ORG_SUFFIXES = r"(?:Inc\.?|Corp\.?|Ltd\.?|LLC|Co\.?|Group|Foundation|Institute|University|College|School|Hospital|Clinic|Bank|Trust|Fund|Labs?|Technologies|Tech|Systems|Services|Partners|Associates|International|Global)"
 
 # Prepositions that introduce locations
-_LOC_PREPS = r"(?:in|at|from|near|to|of|based in|headquartered in)\s+"
+_LOC_PREPS = r"(?:in|at|from|near|to|of)\s+"
 
 # Month names to exclude from person/location detection
 _MONTH_RE = re.compile(
@@ -418,31 +366,7 @@ _KNOWN_LOCATIONS = {
     "berlin", "oslo", "tokyo", "beijing", "sydney", "toronto", "dubai",
     "hawthorne", "palo alto", "cupertino", "seattle", "chicago", "boston",
     "washington", "mountain view", "rochester", "united states",
-    "san francisco", "los angeles", "san carlos", "geneva", "minnesota",
-    "massachusetts", "redmond", "cambridge", "oxford",
-    "austin", "brussels", "lagos", "hong kong", "kenya", "toronto",
-    "kalamazoo", "dublin", "milan", "rome", "washington",
-    "united states",
 }
-
-# Relative / fuzzy date phrases (safe, bounded)
-_RELATIVE_DATE_RE = re.compile(
-    r"\b(?:(?:last|next|this)\s+(?:quarter|month|week|year|monday|tuesday|"
-    r"wednesday|thursday|friday|saturday|sunday)|"
-    r"yesterday|tomorrow|today|"
-    r"Q[1-4]\s*(?:FY)?\s*\d{2,4}|FY\s*\d{2,4})\b",
-    re.IGNORECASE,
-)
-
-# Money amounts as MONEY entities
-_MONEY_RE = re.compile(
-    r"\$\s?\d+(?:,\d{3})*(?:\.\d+)?(?:[MBKk])?|"
-    r"\b\d+(?:,\d{3})*(?:\.\d+)?\s*(?:USD|EUR|GBP|dollars?|euros?|pounds?)\b",
-    re.IGNORECASE,
-)
-
-# Percentages as PERCENT entities
-_PERCENT_RE = re.compile(r"\b\d+(?:\.\d+)?\s*%|\b\d+(?:\.\d+)?\s+percent\b", re.IGNORECASE)
 
 
 def _extract_dates(text: str):
@@ -470,29 +394,17 @@ def _extract_dates(text: str):
         year = m.group(1)
         if year not in dates:
             dates.append(year)
-    for m in _RELATIVE_DATE_RE.finditer(text):
-        candidate = m.group(0).strip()
-        if candidate not in dates:
-            dates.append(candidate)
     return list(dict.fromkeys(dates))  # dedupe, preserve order
 
 
 def _extract_persons(text: str):
     """Extract PERSON entities: two+ adjacent Title-Case words (incl. accented Latin)."""
     persons = []
-    # "Dr. Anya Sharma" / "Mr. John Smith"
-    for m in re.finditer(
-        r"\b(?i:Dr|Mr|Mrs|Ms|Prof)\.\s+"
-        r"([A-ZÀ-ÖØ-Þ][a-zà-öø-ÿ]+(?:\s+[A-ZÀ-ÖØ-Þ][a-zà-öø-ÿ]+){0,2})\b",
-        text,
-    ):
-        persons.append(m.group(1).strip())
     for m in re.finditer(
         rf"\b([A-ZÀ-ÖØ-Þ][a-zà-öø-ÿ]+(?:\s+[A-ZÀ-ÖØ-Þ][a-zà-öø-ÿ]+){{1,2}})\b",
         text,
     ):
         candidate = m.group(1).strip()
-        candidate = re.sub(r"\s+(?:at|in|from|of|on|for|to|with)$", "", candidate, flags=re.I).strip()
         # Skip known orgs or products
         if candidate.lower().rstrip(".") in _KNOWN_ORGS:
             continue
@@ -584,9 +496,10 @@ def _extract_locations(text: str):
             # Don't add if it's a month name
             if not _MONTH_RE.match(candidate):
                 locations.append(candidate)
-    # Known location names (single- and multi-word)
+    # Known location names
     text_lower = text.lower()
     for loc in _KNOWN_LOCATIONS:
+        # Find properly-cased version in text
         for m in re.finditer(rf"\b{re.escape(loc)}\b", text_lower):
             original = text[m.start():m.end()]
             if original not in locations:
@@ -850,25 +763,6 @@ def _solve_logic_deterministically(prompt: str):
     """
     pl = prompt.lower()
 
-    # Fair-coin independence: prior flips do not change the next flip probability.
-    if re.search(r"\bfair coin\b", pl) and re.search(
-        r"\b(next flip|next toss|following flip|next time)\b", pl
-    ):
-        return "1/2"
-
-    # Classic invalid syllogism: "some A are B, some B are C" does not prove "some A are C".
-    if re.search(r"\bcan we conclude\b", pl) and re.search(r"\bsome\b", pl):
-        return "no"
-
-    # Three-switch light-bulb puzzle: heat + on/off inspection strategy.
-    if re.search(r"\bswitch", pl) and re.search(r"\bbulb\b", pl) and re.search(
-        r"\b(inspect|one time|only once|once)\b", pl
-    ):
-        return (
-            "Turn switch 1 on for several minutes so the bulb heats, turn it off, "
-            "turn switch 2 on, then inspect once for warmth and light."
-        )
-
     parsed = _parse_constraint_puzzle(prompt)  # pass original for Title-Case parsing
     if parsed is None:
         return None
@@ -948,65 +842,5 @@ def solve_logic_deterministically(prompt: str):
         return _solve_logic_deterministically(prompt)
     except Exception:
         logger.exception("[DETERM-LOGIC] Unexpected error — falling through")
-        return None
-
-
-def _solve_code_debug_deterministically(prompt: str):
-    """
-    Patch binary-search empty-array bugs only — narrow scope to avoid v26 regressions.
-    """
-    import ast
-
-    if "def " not in prompt:
-        return None
-    if not re.search(r"\bbinary search\b|\bbsearch\b", prompt, re.I):
-        return None
-    if not re.search(r"\barray is empty\b|\bempty input\b|\bwhen.*\bempty\b", prompt, re.I):
-        return None
-
-    lines = []
-    capturing = False
-    for ln in prompt.splitlines():
-        stripped = ln.strip()
-        if stripped.startswith("def "):
-            capturing = True
-        if not capturing:
-            continue
-        if stripped.lower().startswith("handle ") and lines:
-            break
-        if stripped.lower().startswith("fix ") and lines:
-            break
-        if lines and not ln.startswith((" ", "\t")) and not stripped.startswith("def "):
-            break
-        lines.append(ln.rstrip())
-
-    if not lines or not lines[0].startswith("def "):
-        return None
-
-    code = "\n".join(lines)
-    if re.search(r"if\s+not\s+\w+\s*:", code):
-        return None
-
-    pm = re.search(r"def\s+\w+\(\s*(\w+)", code)
-    if not pm:
-        return None
-    param = pm.group(1)
-    patched_lines = [lines[0], f"    if not {param}:", "        return -1", *lines[1:]]
-    patched = "\n".join(patched_lines)
-    try:
-        ast.parse(patched)
-    except SyntaxError:
-        return None
-
-    logger.info("[DETERM-CODE] Patched empty-input guard deterministically.")
-    return f"```python\n{patched}\n```"
-
-
-def solve_code_debug_deterministically(prompt: str):
-    """Public wrapper — never raises; returns None on any error."""
-    try:
-        return _solve_code_debug_deterministically(prompt)
-    except Exception:
-        logger.exception("[DETERM-CODE] Unexpected error — falling through")
         return None
 

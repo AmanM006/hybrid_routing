@@ -95,24 +95,6 @@ async def classify_prompt(prompt: str, local_llm_callable=None) -> str:
     if re.search(r"minimum.*(?:guarantee|certain|sure)|guarantee.*minimum|must draw|to guarantee|minimum number", prompt_lower):
         return "logical_reasoning"
 
-    # Probability puzzles (coin/dice/independence) are logic, not arithmetic word problems.
-    if re.search(r"\bprobability\b", prompt_lower) and re.search(
-        r"\b(coin|flip|dice|roll|heads|tails|fair|independent|next flip|gambler)\b",
-        prompt_lower,
-    ):
-        return "logical_reasoning"
-
-    # Summarization before math — only when the prompt explicitly asks to summarize
-    # (source text may contain %/metrics). Skip if it's clearly a math question.
-    if re.search(
-        r"\b(summarize|summarise|summary|tl;dr|tldr|condense|gist|brief overview)\b",
-        prompt_lower,
-    ) and not re.search(
-        r"\b(how many|how much|calculate|solve for|solve the|what is\s+\d+\s*%?\s*of)\b",
-        prompt_lower,
-    ):
-        return "summarization"
-
     # High-priority math — before propositional "if...then" (word problems often say "if someone bought...")
     has_math_pattern = (
         re.search(r"\b\d+\b.*?(?:percent|%|remain|remains|remaining|total|each|sells|items)\b", prompt_lower) or
