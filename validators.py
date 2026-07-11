@@ -324,20 +324,26 @@ def validate_summarization(prompt: str, output: str) -> bool:
                 return False
             
     # Extract sentence count constraint e.g., "exactly 3 sentences", "in 2 sentences"
-    sentence_limit_match = re.search(r"(\d+)\s*sentences?", prompt_lower)
+    sentence_limit_match = re.search(
+        r"\b(?:exactly\s+)?(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+sentences?\b",
+        prompt_lower,
+    )
     if sentence_limit_match:
-        limit = int(sentence_limit_match.group(1))
-        # Simple sentence splitter
-        sentences = [s for s in re.split(r"[.!?]\s+", output_clean) if s.strip()]
-        exact_requested = bool(re.search(rf"\bexactly\s+{limit}\s+sentences?\b", prompt_lower))
-        if exact_requested and len(sentences) != limit:
-            logger.warning(
-                f"Summarization Validation Failed: Expected exactly {limit} sentences, got {len(sentences)}."
-            )
-            return False
-        if not exact_requested and len(sentences) > limit:
-            logger.warning(f"Summarization Validation Failed: Sentence count {len(sentences)} exceeds limit {limit}.")
-            return False
+        limit = _parse_count(sentence_limit_match.group(1))
+        if limit is not None:
+            sentences = [s for s in re.split(r"(?<=[.!?])\s+", output_clean) if s.strip()]
+            exact_requested = bool(re.search(
+                r"\bexactly\s+(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+sentences?\b",
+                prompt_lower,
+            ))
+            if exact_requested and len(sentences) != limit:
+                logger.warning(
+                    f"Summarization Validation Failed: Expected exactly {limit} sentences, got {len(sentences)}."
+                )
+                return False
+            if not exact_requested and len(sentences) > limit:
+                logger.warning(f"Summarization Validation Failed: Sentence count {len(sentences)} exceeds limit {limit}.")
+                return False
             
     return True
 

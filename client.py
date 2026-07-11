@@ -7,6 +7,18 @@ import re
 
 logger = logging.getLogger(__name__)
 
+_COUNT_WORDS = {
+    "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+    "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+}
+
+
+def _parse_count_token(token: str) -> int | None:
+    token = token.lower()
+    if token.isdigit():
+        return int(token)
+    return _COUNT_WORDS.get(token)
+
 # Category instructions — kept lean for token efficiency
 SYSTEM_PROMPTS = {
     "named_entity_recognition": (
@@ -20,11 +32,13 @@ SYSTEM_PROMPTS = {
         "Use the literal word 'because'. No preamble."
     ),
     "summarization": (
-        "Summarize the text. Respect any length limits in the prompt. "
+        "Summarize the text. Respect any length or format limits in the prompt. "
+        "When the passage presents both benefits and concerns, include both sides. "
         "Output the summary only."
     ),
     "factual_knowledge": (
-        "Answer the question directly and concisely. No preamble."
+        "Answer the question directly in plain prose — no markdown headers or bullet lists. "
+        "Address every part of the question completely. No preamble."
     ),
     "math_reasoning": (
         "Solve the math problem. Show minimal steps, end with 'Answer: <value>' on its own line."
@@ -53,14 +67,24 @@ def get_max_tokens(category: str, prompt: str) -> int:
     elif category == "sentiment_classification":
         return 55
     elif category == "summarization":
-        # Extract word count limits if any
-        word_limit_match = re.search(r"(\d+)\s*words?", prompt.lower())
+        prompt_lower = prompt.lower()
+        if re.search(r"bullet\s*points?", prompt_lower):
+            return 120
+        if re.search(r"\bexactly\s+(?:\d+|one|two|three|four|five)\s+sentences?\b", prompt_lower):
+            return 160
+        word_limit_match = re.search(r"(\d+)\s*words?", prompt_lower)
         if word_limit_match:
             limit = int(word_limit_match.group(1))
             return max(40, limit * 2 + 8)
         return 120
     elif category == "factual_knowledge":
-        return 80
+        prompt_lower = prompt.lower()
+        if re.search(
+            r"\b(explain|describe|difference|compare|briefly|how (?:each|each works|do|does)|what is the difference)\b",
+            prompt_lower,
+        ):
+            return 300
+        return 100
     elif category == "math_reasoning":
         return 120
     elif category == "logical_reasoning":
@@ -68,6 +92,45 @@ def get_max_tokens(category: str, prompt: str) -> int:
     elif category in ["code_generation", "code_debugging"]:
         return 380
     return 100
+
+def get_user_prompt_suffix(category: str, prompt: str) -> str:
+    """Category-specific user suffix shared by remote API and local tier."""
+    if category == "sentiment_classification":
+        return (
+            "\n\nRequired format: <Positive|Negative|Neutral|Mixed> because <brief reason>. "
+            "You MUST use the word because."
+        )
+    if category == "math_reasoning":
+        return "\n\nAnswer:"
+    if category == "logical_reasoning":
+        return "\n\nAnswer:"
+    if category == "named_entity_recognition":
+        return (
+            "\n\nReturn every named person, organization, location, event, product, and date. "
+            "Output only {\"entities\":[{\"text\":\"...\",\"type\":\"...\"}]} JSON."
+        )
+    if category == "summarization":
+        exact_sent = re.search(
+            r"\bexactly\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+sentences?\b",
+            prompt.lower(),
+        )
+        if exact_sent:
+            n = _parse_count_token(exact_sent.group(1))
+            if n == 2:
+                return (
+                    "\n\nWrite exactly 2 complete sentences. "
+                    "Sentence 1: key opportunities, benefits, or applications from the passage "
+                    "(e.g. image analysis, prediction, pattern recognition). "
+                    "Sentence 2: key challenges, risks, or concerns from the passage "
+                    "(e.g. interpretability, privacy, liability, bias, regulatory lag). "
+                    "Use specific details from the text; cover both sides."
+                )
+            if n is not None:
+                return f"\n\nWrite exactly {n} complete sentences. No more, no fewer."
+        return "\n\nSummary:"
+    if category == "factual_knowledge":
+        return "\n\nAnswer completely in plain prose. No markdown."
+    return "\n\nAnswer only."
 
 def get_emergency_fallback(category: str, prompt: str) -> str:
     """
@@ -244,24 +307,34 @@ class FireworksClient:
     @staticmethod
     def _enforce_summary_format(text: str, prompt: str) -> str:
         """Apply explicit sentence-count formatting without changing meaning."""
-        match = re.search(r"\bexactly\s+(\d+)\s+sentences?\b", prompt, re.IGNORECASE)
+        match = re.search(
+            r"\bexactly\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+sentences?\b",
+            prompt,
+            re.IGNORECASE,
+        )
         if not match:
             return text
-        required = int(match.group(1))
+        required = _parse_count_token(match.group(1))
+        if required is None:
+            return text
         sentences = [s for s in re.split(r"(?<=[.!?])\s+", text.strip()) if s.strip()]
         if len(sentences) == required:
             return text
         # A common model failure is joining the requested two facts with
         # ", but". Split that compound sentence deterministically.
         if required == 2 and len(sentences) == 1:
-            parts = re.split(r",\s+(?:but|while|whereas)\s+", text.strip(), maxsplit=1, flags=re.IGNORECASE)
-            if len(parts) == 2:
-                first = parts[0].rstrip(".!?") + "."
-                second = parts[1].strip()
-                if second:
-                    second = second[0].upper() + second[1:]
-                    second = second.rstrip(".!?") + "."
-                    return f"{first} {second}"
+            for pattern in (
+                r"\.\s+(However,)\s+",
+                r",\s+(but|while|whereas|however)\s+",
+            ):
+                parts = re.split(pattern, text.strip(), maxsplit=1, flags=re.IGNORECASE)
+                if len(parts) >= 2:
+                    first = parts[0].rstrip(".!?") + "."
+                    second = parts[-1].strip()
+                    if second:
+                        second = second[0].upper() + second[1:]
+                        second = second.rstrip(".!?") + "."
+                        return f"{first} {second}"
         return text
 
 
@@ -278,22 +351,7 @@ class FireworksClient:
         max_tokens = get_max_tokens(category, prompt)
 
         # Category-specific user suffix to guide output format
-        _USER_SUFFIXES = {
-            "sentiment_classification": "\n\nRequired format: <Positive|Negative|Neutral|Mixed> because <brief reason>. You MUST use the word because.",
-            "math_reasoning": "\n\nAnswer:",
-            "logical_reasoning": "\n\nAnswer:",
-            "named_entity_recognition": (
-                "\n\nReturn every named person, organization, location, event, product, and date. "
-                "Output only {\"entities\":[{\"text\":\"...\",\"type\":\"...\"}]} JSON."
-            ),
-            "summarization": "\n\nSummary:",
-        }
-        user_suffix = _USER_SUFFIXES.get(category, "\n\nAnswer only.")
-        if category == "summarization":
-            exact_sent = re.search(r"\bexactly\s+(\d+)\s+sentences?\b", prompt.lower())
-            if exact_sent:
-                n = exact_sent.group(1)
-                user_suffix = f"\n\nWrite exactly {n} complete sentences. No more, no fewer."
+        user_suffix = get_user_prompt_suffix(category, prompt)
         
         messages = [
             {"role": "system", "content": system_prompt},

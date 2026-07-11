@@ -11,7 +11,7 @@ os.environ["ALLOWED_MODELS"] = "accounts/fireworks/models/llama-v3p1-8b-instruct
 
 from classifier import classify_prompt
 from validators import validate_category_output, coerce_ner_output
-from client import FireworksClient, get_emergency_fallback
+from client import FireworksClient, get_emergency_fallback, get_max_tokens
 from deterministic_solvers import solve_ner_deterministically
 from main import classify_model_roles
 import main
@@ -279,6 +279,23 @@ class TestGeneralPurposeAgent(unittest.IsolatedAsyncioTestCase):
             "- Organisations invest in digital collaboration tools and rethink office space usage."
         )
         self.assertTrue(validate_category_output("summarization", prompt_bullets, long_but_valid_bullets))
+
+    def test_token_budget_for_explanatory_factual_and_two_sentence_summary(self):
+        explain = "Explain the difference between RAM and ROM in a computer."
+        self.assertEqual(get_max_tokens("factual_knowledge", explain), 300)
+        self.assertEqual(get_max_tokens("factual_knowledge", "What is gravity?"), 100)
+        two_sent = "Summarize the following passage in exactly two sentences: 'Long text here.'"
+        self.assertEqual(get_max_tokens("summarization", two_sent), 160)
+        one_sentence = (
+            "Machine learning helps healthcare by analysing images, predicting deterioration, "
+            "and spotting patterns in records that clinicians might miss."
+        )
+        two_sentence = (
+            f"{one_sentence} However, concerns remain about interpretability, privacy, liability, "
+            "bias, and regulatory lag."
+        )
+        self.assertFalse(validate_category_output("summarization", two_sent, one_sentence))
+        self.assertTrue(validate_category_output("summarization", two_sent, two_sentence))
 
     def test_factual_validator(self):
         """
