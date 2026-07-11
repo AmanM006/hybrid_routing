@@ -216,6 +216,19 @@ class TestGeneralPurposeAgent(unittest.IsolatedAsyncioTestCase):
         self.assertIn("because", normalized.lower())
         self.assertTrue(validate_category_output("sentiment_classification", prompt, normalized))
 
+    def test_record_usage_accumulates_fireworks_tokens(self):
+        client = FireworksClient("fake", "https://example.invalid")
+        usage = MagicMock(prompt_tokens=40, completion_tokens=12)
+        response = MagicMock(usage=usage)
+        client._record_usage(response, "minimax-m3", "factual_knowledge")
+        self.assertEqual(client.total_prompt_tokens, 40)
+        self.assertEqual(client.total_completion_tokens, 12)
+        self.assertEqual(client.total_calls, 1)
+        self.assertEqual(client.total_fireworks_tokens(), 52)
+        # Missing usage must not raise or change counters
+        client._record_usage(MagicMock(usage=None), "minimax-m3", "factual_knowledge")
+        self.assertEqual(client.total_calls, 1)
+
     def test_ner_partial_answers_fall_through_and_heading_repair(self):
         # Missing event/product/date candidates must not be accepted as a
         # confident deterministic extraction.
@@ -228,10 +241,16 @@ class TestGeneralPurposeAgent(unittest.IsolatedAsyncioTestCase):
             {"text": "Wimbledon", "type": "EVENT"},
             event_entities,
         )
-        self.assertIsNone(solve_ner_deterministically(
+        # v36: clinical-note NER with Dr. title + drug name is now deterministic
+        clinical = solve_ner_deterministically(
             "Can you extract named entities from this customer note? "
             "Dr. Anya Sharma at Mayo Clinic in Rochester prescribed Lisinopril on March 3, 2024."
-        ))
+        )
+        self.assertIsNotNone(clinical)
+        clinical_entities = json.loads(clinical)["entities"]
+        clinical_texts = {e["text"] for e in clinical_entities}
+        self.assertIn("Anya Sharma", clinical_texts)
+        self.assertIn("Lisinopril", clinical_texts)
 
         repaired, ok = coerce_ner_output(
             "**People:** Sundar Pichai\n"
@@ -350,6 +369,7 @@ class TestMainLoop(unittest.IsolatedAsyncioTestCase):
             
         mock_client = AsyncMock()
         mock_client.call_api.return_value = "positive - because it is happy."
+        mock_client.total_fireworks_tokens = MagicMock(return_value=0)
         
         roles = {
             "code": "model-code",

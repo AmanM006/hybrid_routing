@@ -143,7 +143,9 @@ def parse_task_logs(text):
     logs = {}
     pat = re.compile(
         r"TASK_LOG:\s+task_id=(\S+)\s*\|\s*category=(\S+)\s*\|\s*tier=(\S+)\s*\|"
-        r"\s*model=(\S+)\s*\|\s*approx_tokens=(\d+)\s*\|\s*validation=(\S+)"
+        r"\s*model=(\S+)\s*\|\s*approx_tokens=(\d+)"
+        r"(?:\s*\|\s*fw_tokens=(\d+))?"
+        r"\s*\|\s*validation=(\S+)"
     )
     for line in text.splitlines():
         m = pat.search(line)
@@ -152,7 +154,8 @@ def parse_task_logs(text):
                 "category": m.group(2),
                 "tier": m.group(3),
                 "model": m.group(4),
-                "validation": m.group(6),
+                "fw_tokens": int(m.group(6)) if m.group(6) else None,
+                "validation": m.group(7),
             }
     return logs
 

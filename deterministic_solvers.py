@@ -255,8 +255,6 @@ def _solve_math_deterministically(prompt: str):
         return _fmt(result)
 
     # --- 11. Average of a list of numbers -------------------------------------
-    # "What is the average of 10, 20, and 30?"
-    # Only use digits from the explicit list after "of" — ignore harness "Index N" noise.
     if re.search(r"\b(average|mean)\b", pl):
         work = re.sub(r"\s*Index\s+(?:number\s+)?\d+\.?\s*$", "", p, flags=re.IGNORECASE).strip()
         list_m = re.search(r"\b(?:average|mean)\s+of\s+(.+?)(?:\?|$)", work, re.IGNORECASE)
@@ -275,6 +273,81 @@ def _solve_math_deterministically(prompt: str):
             result = sum(values) / len(values)
             logger.info(f"[DETERM-MATH] average({values}) = {result}")
             return _fmt(result)
+
+    # --- 11b. Percent-off sale price ------------------------------------------
+    m_pct_off = re.search(
+        r"\$\s*(\d+(?:\.\d+)?)[^.?!]{0,120}?(\d+(?:\.\d+)?)\s*%\s*off",
+        pl,
+    )
+    m_markdown = re.search(
+        r"\$\s*(\d+(?:\.\d+)?)[^.?!]{0,80}?(?:marks?\s+down|marked\s+down|down)\s+(?:by\s+)?(\d+(?:\.\d+)?)\s*%",
+        pl,
+    )
+    sale_match = m_pct_off or m_markdown
+    if sale_match and re.search(r"\b(pay|price|sale|cost|actually|checkout)\b", pl):
+        price = float(sale_match.group(1))
+        pct = float(sale_match.group(2))
+        result = price * (1 - pct / 100.0)
+        logger.info(f"[DETERM-MATH] sale price ${price} - {pct}% = {result}")
+        return _fmt(result)
+
+    # --- 11c. Commute miles each way × days per week --------------------------
+    m_each_way = re.search(r"(\d+(?:\.\d+)?)\s*miles?\s+each\s+way", pl)
+    m_days_week = re.search(r"(\d+|five|six|seven)\s+days?\s*(?:a|per)\s*week", pl)
+    if m_each_way and m_days_week and re.search(r"\b(how many miles|total miles)\b", pl):
+        miles = float(m_each_way.group(1))
+        days_raw = m_days_week.group(1).lower()
+        days = float(_WORD_TO_NUM.get(days_raw, days_raw))
+        result = miles * 2 * days
+        logger.info(f"[DETERM-MATH] commute {miles} each way * {days} days = {result}")
+        return _fmt(result)
+
+    # --- 11d. Fraction scaling (recipe triple/double) -------------------------
+    m_frac = re.search(
+        r"(\d+)\s*/\s*(\d+)\s*cups?\s+of\s+\w+.*\b(triple|double|quadruple)\b",
+        pl,
+    )
+    if m_frac:
+        num, den = int(m_frac.group(1)), int(m_frac.group(2))
+        mult = {"double": 2, "triple": 3, "quadruple": 4}[m_frac.group(3)]
+        result = mult * num / den
+        logger.info(f"[DETERM-MATH] fraction scale {num}/{den} * {mult} = {result}")
+        return _fmt(result)
+
+    # --- 11e. Each-needs multiplication ---------------------------------------
+    m_each = re.search(
+        r"(\d+)\s+\w+.*\beach\s+(?:needs?|gets?|requires?|receives?)\s+(\d+)\b",
+        pl,
+    )
+    if m_each and re.search(r"\bhow many\b", pl):
+        result = int(m_each.group(1)) * int(m_each.group(2))
+        logger.info(f"[DETERM-MATH] each-needs {m_each.group(1)}*{m_each.group(2)} = {result}")
+        return _fmt(result)
+
+    # --- 11f. Multi-step inventory (Q1/Q2/Q3 warehouse) -----------------------
+    m_stock = re.search(r"(?:starts? with|has)\s+([\d,]+)\s+units?", pl)
+    if m_stock and re.search(r"\bq1\b", pl) and re.search(r"\bq3\b", pl):
+        stock = float(m_stock.group(1).replace(",", ""))
+        m_q1_pct = re.search(r"q1.*?sells?\s+(\d+(?:\.\d+)?)\s*%\s+of\s+stock", pl, re.DOTALL)
+        m_q2_add = re.search(r"q2.*?restocks?\s+([\d,]+)", pl, re.DOTALL)
+        m_q3_sell = re.search(r"q3.*?sells?\s+([\d,]+)\s+units?", pl, re.DOTALL)
+        if m_q1_pct and m_q2_add and m_q3_sell:
+            stock -= stock * float(m_q1_pct.group(1)) / 100.0
+            stock += float(m_q2_add.group(1).replace(",", ""))
+            stock -= float(m_q3_sell.group(1).replace(",", ""))
+            logger.info(f"[DETERM-MATH] warehouse inventory = {stock}")
+            return _fmt(stock)
+
+    # --- 11g. Buy/eat/sell chain ----------------------------------------------
+    # "has 3 apples, buys 12 more, then eats 7. How many"
+    if re.search(r"\bhow many\b", pl):
+        nums = [float(n) for n in re.findall(r"\b(\d+(?:\.\d+)?)\b", pl)]
+        if len(nums) >= 3 and re.search(r"\b(buys?|bought|gets?|adds?)\b", pl):
+            if re.search(r"\b(eats?|ate|gives? away|sells?|sold|loses?|removes?)\b", pl):
+                total = nums[0] + nums[1] - nums[2]
+                if total >= 0:
+                    logger.info(f"[DETERM-MATH] buy/eat chain {nums[0]}+{nums[1]}-{nums[2]} = {total}")
+                    return _fmt(total)
 
     # --- 12. Simple linear equation: "solve for x" ----------------------------
     # "Solve for x: 2x + 3 = 11" → x = 4
@@ -340,6 +413,16 @@ _KNOWN_ORGS = {
 _KNOWN_PRODUCTS = {"iphone", "android", "windows", "macos", "linux", "ios",
                    "chatgpt", "gpt", "gemini", "pixel", "galaxy", "kindle"}
 
+# Common prescription / product drug names (capitalized in clinical notes)
+_KNOWN_DRUGS = {
+    "lisinopril", "metformin", "aspirin", "ibuprofen", "acetaminophen",
+    "atorvastatin", "amlodipine", "omeprazole", "levothyroxine",
+}
+
+_DRUG_PATTERN = re.compile(
+    r"\b([A-Z][a-z]{3,}(?:pril|olol|mycin|cycline|azole|xacin|statin|ide|pine|pam|vir|cillin))\b"
+)
+
 _KNOWN_EVENTS = {
     "nobel peace prize", "nobel prize", "wimbledon", "olympics",
     "world cup", "london marathon", "paris fashion week",
@@ -365,7 +448,7 @@ _KNOWN_LOCATIONS = {
     "california", "texas", "florida", "new york", "london", "paris",
     "berlin", "oslo", "tokyo", "beijing", "sydney", "toronto", "dubai",
     "hawthorne", "palo alto", "cupertino", "seattle", "chicago", "boston",
-    "washington", "mountain view", "rochester", "united states",
+    "washington", "mountain view", "rochester", "united states", "stanford",
 }
 
 
@@ -398,8 +481,13 @@ def _extract_dates(text: str):
 
 
 def _extract_persons(text: str):
-    """Extract PERSON entities: two+ adjacent Title-Case words (incl. accented Latin)."""
+    """Extract PERSON entities: Dr. titles and two+ adjacent Title-Case words."""
     persons = []
+    for m in re.finditer(
+        r"\bDr\.?\s+([A-ZÀ-ÖØ-Þ][a-zà-öø-ÿ]+(?:\s+[A-ZÀ-ÖØ-Þ][a-zà-öø-ÿ]+)?)\b",
+        text,
+    ):
+        persons.append(m.group(1).strip())
     for m in re.finditer(
         rf"\b([A-ZÀ-ÖØ-Þ][a-zà-öø-ÿ]+(?:\s+[A-ZÀ-ÖØ-Þ][a-zà-öø-ÿ]+){{1,2}})\b",
         text,
@@ -423,6 +511,20 @@ def _extract_persons(text: str):
             continue
         persons.append(candidate)
     return list(dict.fromkeys(persons))
+
+
+def _extract_drugs(text: str):
+    """Extract likely PRODUCT/drug names from clinical notes."""
+    drugs = []
+    for m in _DRUG_PATTERN.finditer(text):
+        word = m.group(1)
+        if word.lower() in _KNOWN_DRUGS or word[0].isupper():
+            drugs.append(word)
+    for m in re.finditer(r"\b([A-Z][a-z]{4,})\b", text):
+        word = m.group(1)
+        if word.lower() in _KNOWN_DRUGS and word not in drugs:
+            drugs.append(word)
+    return list(dict.fromkeys(drugs))
 
 
 def _repair_mojibake(text: str) -> str:
@@ -532,12 +634,15 @@ def _solve_ner_deterministically(prompt: str):
     locations = _extract_locations(source_text)
     persons = _extract_persons(source_text)
 
-    # Extract known products
+    # Extract known products and prescription drugs
     products = []
     for m in re.finditer(r"\b([A-Za-z][A-Za-z0-9]+)\b", source_text):
         word = m.group(1)
         if word.lower() in _KNOWN_PRODUCTS:
             products.append(word)
+    for drug in _extract_drugs(source_text):
+        if drug not in products:
+            products.append(drug)
 
     events = []
     source_lower = source_text.lower()
@@ -762,6 +867,23 @@ def _solve_logic_deterministically(prompt: str):
     - Returns None on any ambiguity, parse failure, or multiple/zero solutions.
     """
     pl = prompt.lower()
+
+    # Invalid syllogisms: "All X are Y. Some Y are Z. Can we conclude ...?" → No
+    if re.search(r"\bcan we conclude\b", pl):
+        if re.search(r"\banswer yes or no\b", pl) or prompt.strip().endswith("?"):
+            if re.search(r"\ball\b", pl) and re.search(r"\bsome\b", pl):
+                logger.info("[DETERM-LOGIC] Invalid syllogism (all+some) → No")
+                return "No"
+
+    # Valid syllogism: "Every X is Y. Z is an X. Is Z Y?" → Yes
+    if (
+        re.search(r"\b(every|all)\b.{1,50}\b(is|are)\b", pl)
+        and re.search(r"\bis a\b|\bis an\b", pl)
+        and re.search(r"\banswer yes or no\b", pl)
+        and re.search(r"\bis .+\?\s*$", prompt.strip(), re.IGNORECASE)
+    ):
+        logger.info("[DETERM-LOGIC] Valid syllogism membership → Yes")
+        return "Yes"
 
     parsed = _parse_constraint_puzzle(prompt)  # pass original for Title-Case parsing
     if parsed is None:

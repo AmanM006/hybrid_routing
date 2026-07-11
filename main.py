@@ -294,6 +294,25 @@ def write_output_results(results_map, output_path):
     except Exception as e:
         logger.error(f"Failed to write results to output path: {e}")
 
+
+def _print_task_log(
+    task_id,
+    category,
+    tier,
+    model,
+    approx_tokens,
+    validation_pass,
+    latency,
+    fw_tokens=0,
+):
+    print(
+        f"TASK_LOG: task_id={task_id} | category={category} | tier={tier} | "
+        f"model={model} | approx_tokens={approx_tokens} | fw_tokens={fw_tokens} | "
+        f"validation={'PASS' if validation_pass else 'FAIL'} | latency={latency:.2f}s",
+        flush=True,
+    )
+
+
 async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remote_sem):
     """
     The full cascade routing implementation.
@@ -319,6 +338,7 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
     answer = ""
     validation_pass = False
     start_time = time.time()
+    fw_start = client.total_fireworks_tokens()
 
     # 2. DETERMINISTIC FIRST-PASS — zero tokens, zero risk
     # Math: solve purely with code; NER: extract with regex.
@@ -329,8 +349,9 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
             if det_answer is not None:
                 logger.info(f"Task {task_id}: Solved deterministically (math). Answer={det_answer!r}")
                 latency = time.time() - start_time
-                print(f"TASK_LOG: task_id={task_id} | category={category} | tier=deterministic | "
-                      f"model=none | approx_tokens=0 | validation=PASS | latency={latency:.2f}s", flush=True)
+                _print_task_log(
+                    task_id, category, "deterministic", "none", 0, True, latency, fw_tokens=0
+                )
                 return {"task_id": task_id, "answer": det_answer}
         except Exception as e:
             logger.error(f"Task {task_id}: Math deterministic solver raised an exception: {e}", exc_info=True)
@@ -341,8 +362,9 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
             if det_answer is not None and validate_ner(det_answer, prompt):
                 logger.info(f"Task {task_id}: Solved deterministically (NER). Answer={det_answer!r}")
                 latency = time.time() - start_time
-                print(f"TASK_LOG: task_id={task_id} | category={category} | tier=deterministic | "
-                      f"model=none | approx_tokens=0 | validation=PASS | latency={latency:.2f}s", flush=True)
+                _print_task_log(
+                    task_id, category, "deterministic", "none", 0, True, latency, fw_tokens=0
+                )
                 return {"task_id": task_id, "answer": det_answer}
         except Exception as e:
             logger.error(f"Task {task_id}: NER deterministic solver raised an exception: {e}", exc_info=True)
@@ -353,8 +375,9 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
             if det_answer is not None:
                 logger.info(f"Task {task_id}: Solved deterministically (logic constraint). Answer={det_answer!r}")
                 latency = time.time() - start_time
-                print(f"TASK_LOG: task_id={task_id} | category={category} | tier=deterministic | "
-                      f"model=none | approx_tokens=0 | validation=PASS | latency={latency:.2f}s", flush=True)
+                _print_task_log(
+                    task_id, category, "deterministic", "none", 0, True, latency, fw_tokens=0
+                )
                 return {"task_id": task_id, "answer": det_answer}
         except Exception as e:
             logger.error(f"Task {task_id}: Logic deterministic solver raised an exception: {e}", exc_info=True)
@@ -643,9 +666,17 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
     # Log information to stdout only
     latency = time.time() - start_time
     approx_tokens = len(answer) // 4
-    print(f"TASK_LOG: task_id={task_id} | category={category} | tier={tier_used} | "
-          f"model={model_name} | approx_tokens={approx_tokens} | "
-          f"validation={'PASS' if validation_pass else 'FAIL'} | latency={latency:.2f}s", flush=True)
+    fw_tokens = client.total_fireworks_tokens() - fw_start
+    _print_task_log(
+        task_id,
+        category,
+        tier_used,
+        model_name,
+        approx_tokens,
+        validation_pass,
+        latency,
+        fw_tokens=fw_tokens,
+    )
           
     return {"task_id": task_id, "answer": answer}
 
@@ -722,6 +753,14 @@ async def main():
                 # Other failure (timeout, 5xx) — keep the model, may recover
                 logger.warning(f"Healthcheck for '{model_name}': SOFT_FAIL (keeping in cascade) — {e}")
                 live_models.append(model_name)
+
+    tokens_after_healthcheck = client.total_fireworks_tokens()
+    print(
+        f"FIREWORKS_HEALTHCHECK: calls={client.total_calls} | "
+        f"prompt={client.total_prompt_tokens} | completion={client.total_completion_tokens} | "
+        f"total={tokens_after_healthcheck}",
+        flush=True,
+    )
     
     if dead_models:
         logger.warning(f"Pruned {len(dead_models)} dead models from cascade: {dead_models}")
@@ -793,6 +832,14 @@ async def main():
     finally:
         # Wrap final write in try/finally to flush results on interruption
         write_output_results(results_map, output_path)
+        task_tokens = client.total_fireworks_tokens() - tokens_after_healthcheck
+        print(
+            f"FIREWORKS_TOTAL: calls={client.total_calls} | "
+            f"prompt={client.total_prompt_tokens} | completion={client.total_completion_tokens} | "
+            f"total={client.total_fireworks_tokens()} | "
+            f"healthcheck={tokens_after_healthcheck} | tasks={task_tokens}",
+            flush=True,
+        )
         if proc:
             logger.info("Stopping local llama-server process...")
             try:

@@ -221,6 +221,28 @@ class FireworksClient:
             api_key=api_key,
             base_url=base_url
         )
+        self.total_prompt_tokens = 0
+        self.total_completion_tokens = 0
+        self.total_calls = 0
+
+    def total_fireworks_tokens(self) -> int:
+        return self.total_prompt_tokens + self.total_completion_tokens
+
+    def _record_usage(self, response, model: str, category: str) -> None:
+        usage = getattr(response, "usage", None)
+        if usage is None:
+            return
+        prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
+        completion_tokens = getattr(usage, "completion_tokens", 0) or 0
+        self.total_prompt_tokens += prompt_tokens
+        self.total_completion_tokens += completion_tokens
+        self.total_calls += 1
+        total = prompt_tokens + completion_tokens
+        print(
+            f"FIREWORKS_USAGE: model={model} | category={category} | "
+            f"prompt_tokens={prompt_tokens} | completion_tokens={completion_tokens} | total={total}",
+            flush=True,
+        )
 
     def _scrub_cot(self, text: str, category: str) -> str:
         """
@@ -401,7 +423,8 @@ class FireworksClient:
                         response = await self.client.chat.completions.create(**kwargs)
                     else:
                         raise e
-                        
+
+                self._record_usage(response, model, category)
                 msg = response.choices[0].message
                 content = msg.content
                 

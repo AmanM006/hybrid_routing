@@ -6,7 +6,7 @@ import json
 import os
 import sys
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 sys.path.insert(0, ".")
 os.environ.setdefault("FIREWORKS_API_KEY", "fake")
@@ -77,6 +77,7 @@ class TestGemmaSkipPropagation(unittest.IsolatedAsyncioTestCase):
 
         called_models = []
         mock_client = AsyncMock()
+        mock_client.total_fireworks_tokens = MagicMock(return_value=0)
 
         async def track_call(model, category, prompt, timeout=12.0):
             called_models.append(model)

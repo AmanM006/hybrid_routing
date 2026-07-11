@@ -136,6 +136,7 @@ async def classify_prompt(prompt: str, local_llm_callable=None) -> str:
     # lets the downstream category scoring route them correctly.
     instruction_override = bool(
         re.search(r"summar(?:y|ize|ise|izing|ising)|bullet\s*point|tl;?dr", prompt_lower)
+        or re.search(r"\bunder\s+\d+\s+words?\b", prompt_lower)
         or re.search(
             r"\b(extract|identify|label|tag)\b.{0,60}\b(entit|named entit|person|organization|organisation|location|date)\b",
             prompt_lower,

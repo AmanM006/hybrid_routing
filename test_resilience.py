@@ -8,7 +8,7 @@ import os
 import sys
 import tempfile
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 os.environ.setdefault("FIREWORKS_API_KEY", "fake_key")
 os.environ.setdefault("FIREWORKS_BASE_URL", "https://api.fireworks.ai/inference/v1")
@@ -41,6 +41,7 @@ class TestResilience(unittest.IsolatedAsyncioTestCase):
         }
         mock_client = AsyncMock()
         mock_client.call_api.return_value = "Paris"
+        mock_client.total_fireworks_tokens = MagicMock(return_value=0)
 
         results_map = {
             t["task_id"]: {"task_id": t["task_id"], "answer": "System interrupted"}
