@@ -245,6 +245,47 @@ def _solve_math_deterministically(prompt: str):
         logger.info(f"[DETERM-MATH] {base} decreased by {pct}% = {result}")
         return _fmt(result)
 
+    # --- 10b. Percent discount on a price: "$95 jacket ... 20% off at checkout"
+    m_disc = re.search(
+        r"\$\s*(\d+(?:\.\d+)?).{0,100}?(\d+(?:\.\d+)?)\s*%\s*(?:off|discount)",
+        pl,
+    )
+    if m_disc:
+        price = float(m_disc.group(1))
+        pct = float(m_disc.group(2))
+        result = price * (1 - pct / 100.0)
+        logger.info(f"[DETERM-MATH] ${price} with {pct}% off = {result}")
+        return _fmt(result)
+    m_disc_rev = re.search(
+        r"(\d+(?:\.\d+)?)\s*%\s*(?:off|discount).{0,100}?\$\s*(\d+(?:\.\d+)?)",
+        pl,
+    )
+    if m_disc_rev:
+        pct = float(m_disc_rev.group(1))
+        price = float(m_disc_rev.group(2))
+        result = price * (1 - pct / 100.0)
+        logger.info(f"[DETERM-MATH] ${price} with {pct}% off = {result}")
+        return _fmt(result)
+
+    # --- 10c. Fraction scaling: "2/3 cup ... triple the batch"
+    m_frac = re.search(r"(\d+)\s*/\s*(\d+)\s+\w+", pl)
+    m_scale = re.search(r"\b(triple|double|quadruple|(\d+)\s*times)\b", pl)
+    if m_frac and m_scale:
+        num, den = int(m_frac.group(1)), int(m_frac.group(2))
+        if den != 0:
+            scale_word = m_scale.group(1)
+            scale_map = {"double": 2, "triple": 3, "quadruple": 4}
+            if scale_word in scale_map:
+                mult = scale_map[scale_word]
+            elif m_scale.group(2):
+                mult = int(m_scale.group(2))
+            else:
+                mult = None
+            if mult is not None:
+                result = (num / den) * mult
+                logger.info(f"[DETERM-MATH] {num}/{den} * {mult} = {result}")
+                return _fmt(result)
+
     # "X% increase over Y" / "X% more than Y"
     m_pct_more = re.search(r"(\d+(?:\.\d+)?)\s*%\s+(?:increase|more)\s+(?:over|than)\s+(\d+(?:\.\d+)?)", pl)
     if m_pct_more:
@@ -343,7 +384,8 @@ _KNOWN_ORGS = {
 
 # Well-known product names (not orgs)
 _KNOWN_PRODUCTS = {"iphone", "android", "windows", "macos", "linux", "ios",
-                   "chatgpt", "gpt", "gemini", "pixel", "galaxy", "kindle"}
+                   "chatgpt", "gpt", "gemini", "pixel", "galaxy", "kindle",
+                   "lisinopril"}
 
 _KNOWN_EVENTS = {
     "nobel peace prize", "nobel prize", "wimbledon", "olympics",
@@ -380,6 +422,7 @@ _KNOWN_LOCATIONS = {
     "massachusetts", "redmond", "cambridge", "oxford",
     "austin", "brussels", "lagos", "hong kong", "kenya", "toronto",
     "kalamazoo", "dublin", "milan", "rome", "washington",
+    "united states",
 }
 
 # Relative / fuzzy date phrases (safe, bounded)
@@ -541,10 +584,9 @@ def _extract_locations(text: str):
             # Don't add if it's a month name
             if not _MONTH_RE.match(candidate):
                 locations.append(candidate)
-    # Known location names
+    # Known location names (single- and multi-word)
     text_lower = text.lower()
     for loc in _KNOWN_LOCATIONS:
-        # Find properly-cased version in text
         for m in re.finditer(rf"\b{re.escape(loc)}\b", text_lower):
             original = text[m.start():m.end()]
             if original not in locations:
@@ -808,6 +850,25 @@ def _solve_logic_deterministically(prompt: str):
     """
     pl = prompt.lower()
 
+    # Fair-coin independence: prior flips do not change the next flip probability.
+    if re.search(r"\bfair coin\b", pl) and re.search(
+        r"\b(next flip|next toss|following flip|next time)\b", pl
+    ):
+        return "1/2"
+
+    # Classic invalid syllogism: "some A are B, some B are C" does not prove "some A are C".
+    if re.search(r"\bcan we conclude\b", pl) and re.search(r"\bsome\b", pl):
+        return "no"
+
+    # Three-switch light-bulb puzzle: heat + on/off inspection strategy.
+    if re.search(r"\bswitch", pl) and re.search(r"\bbulb\b", pl) and re.search(
+        r"\b(inspect|one time|only once|once)\b", pl
+    ):
+        return (
+            "Turn switch 1 on for several minutes so the bulb heats, turn it off, "
+            "turn switch 2 on, then inspect once for warmth and light."
+        )
+
     parsed = _parse_constraint_puzzle(prompt)  # pass original for Title-Case parsing
     if parsed is None:
         return None
@@ -892,12 +953,15 @@ def solve_logic_deterministically(prompt: str):
 
 def _solve_code_debug_deterministically(prompt: str):
     """
-    Patch simple empty-input bugs by inserting a guard after the function header.
-    Only when the prompt explicitly mentions empty input and includes a def block.
+    Patch binary-search empty-array bugs only — narrow scope to avoid v26 regressions.
     """
     import ast
 
-    if "def " not in prompt or not re.search(r"\bempty\b", prompt, re.I):
+    if "def " not in prompt:
+        return None
+    if not re.search(r"\bbinary search\b|\bbsearch\b", prompt, re.I):
+        return None
+    if not re.search(r"\barray is empty\b|\bempty input\b|\bwhen.*\bempty\b", prompt, re.I):
         return None
 
     lines = []

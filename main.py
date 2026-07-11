@@ -29,6 +29,7 @@ from deterministic_solvers import (
     solve_math_deterministically,
     solve_ner_deterministically,
     solve_logic_deterministically,
+    solve_code_debug_deterministically,
 )
 
 
@@ -348,6 +349,18 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
                 return {"task_id": task_id, "answer": det_answer}
         except Exception as e:
             logger.error(f"Task {task_id}: Logic deterministic solver raised an exception: {e}", exc_info=True)
+
+    if category == "code_debugging":
+        try:
+            det_answer = solve_code_debug_deterministically(prompt)
+            if det_answer is not None and validate_category_output(category, prompt, det_answer):
+                logger.info(f"Task {task_id}: Solved deterministically (code-debug). Answer={det_answer!r}")
+                latency = time.time() - start_time
+                print(f"TASK_LOG: task_id={task_id} | category={category} | tier=deterministic | "
+                      f"model=none | approx_tokens=0 | validation=PASS | latency={latency:.2f}s", flush=True)
+                return {"task_id": task_id, "answer": det_answer}
+        except Exception as e:
+            logger.error(f"Task {task_id}: Code-debug deterministic solver raised an exception: {e}", exc_info=True)
     
     # 2. Local Tier (Easy categories)
     if category in easy_categories and not local_disabled:

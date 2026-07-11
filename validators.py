@@ -528,7 +528,13 @@ def validate_category_output(category: str, prompt: str, output: str) -> bool:
     elif category in ["math_reasoning", "logical_reasoning"]:
         return validate_reasoning(output)
     elif category == "code_generation":
+        coerced = coerce_code_output(output)
+        if coerced:
+            output = coerced
         return validate_code(prompt, output, is_debugging=False)
     elif category == "code_debugging":
+        coerced = coerce_code_output(output)
+        if coerced:
+            output = coerced
         return validate_code(prompt, output, is_debugging=True)
     return True

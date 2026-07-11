@@ -242,12 +242,15 @@ class TestGeneralPurposeAgent(unittest.IsolatedAsyncioTestCase):
             {"text": "Wimbledon", "type": "EVENT"},
             event_entities,
         )
-        # Lisinopril is not in _KNOWN_PRODUCTS — partial deterministic must fall through.
+        # Lisinopril is in _KNOWN_PRODUCTS — complete deterministic extraction is safe.
         clinic_result = solve_ner_deterministically(
             "Can you extract named entities from this customer note? "
             "Dr. Anya Sharma at Mayo Clinic in Rochester prescribed Lisinopril on March 3, 2024."
         )
-        self.assertIsNone(clinic_result)
+        self.assertIsNotNone(clinic_result)
+        clinic_entities = {e["text"] for e in json.loads(clinic_result)["entities"]}
+        self.assertIn("Lisinopril", clinic_entities)
+        self.assertIn("Mayo Clinic", clinic_entities)
 
         repaired, ok = coerce_ner_output(
             "**People:** Sundar Pichai\n"
@@ -289,10 +292,26 @@ class TestGeneralPurposeAgent(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(client._scrub_cot("Answer: juice", "logical_reasoning"), "juice")
         self.assertEqual(client._scrub_cot("Answer: 1/2", "logical_reasoning"), "1/2")
 
-    def test_code_debug_deterministic_not_used_in_pipeline(self):
-        """Generic empty-input patch must not bypass remote code models."""
+    def test_code_debug_deterministic_binary_search_only(self):
+        """Only binary-search empty-array bugs get a deterministic patch."""
         from deterministic_solvers import solve_code_debug_deterministically
-        prompt = (
+
+        bsearch_prompt = (
+            "Bug in binary search — misses when array is empty:\n"
+            "def bsearch(a, x):\n"
+            "    lo, hi = 0, len(a)\n"
+            "    while lo < hi:\n"
+            "        mid = (lo+hi)//2\n"
+            "        if a[mid] < x: lo = mid+1\n"
+            "        else: hi = mid\n"
+            "    return lo\n"
+            "Handle empty input safely."
+        )
+        patch = solve_code_debug_deterministically(bsearch_prompt)
+        self.assertIsNotNone(patch)
+        self.assertIn("if not a", patch)
+
+        generic_prompt = (
             "Fix off-by-one error in sum:\n"
             "def total(nums):\n"
             "    s = 0\n"
@@ -301,15 +320,13 @@ class TestGeneralPurposeAgent(unittest.IsolatedAsyncioTestCase):
             "    return s\n"
             "Also handle empty input."
         )
-        # Solver may return a patch — pipeline must not call it (removed in v27).
-        patch = solve_code_debug_deterministically(prompt)
+        self.assertIsNone(solve_code_debug_deterministically(generic_prompt))
+
         import main
         src = open(main.__file__, encoding="utf-8").read()
-        self.assertNotIn("solve_code_debug_deterministically", src)
+        self.assertIn("solve_code_debug_deterministically", src)
 
-        """
-        Tests summary length constraints.
-        """
+    def test_summarization_length_constraints(self):
         prompt_limit = "Summarize in 5 words or less: the quick brown fox jumps over the lazy dog."
         self.assertTrue(validate_category_output("summarization", prompt_limit, "Quick brown fox jumps.")) # 4 words
         # 10 words (exceeds limit + buffer)
