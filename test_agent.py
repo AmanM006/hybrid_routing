@@ -139,6 +139,20 @@ class TestGeneralPurposeAgent(unittest.IsolatedAsyncioTestCase):
         for prompt in math_prompts:
             self.assertEqual(await classify_prompt(prompt), "math_reasoning")
 
+    async def test_summarize_with_percent_in_source_not_math(self):
+        prompt = (
+            "Summarize for a busy manager (under 20 words): Our Q3 revenue rose 8% "
+            "year-over-year driven by enterprise subscriptions, while consumer churn ticked up slightly."
+        )
+        self.assertEqual(await classify_prompt(prompt), "summarization")
+
+    async def test_coin_probability_is_logic_not_math(self):
+        prompt = (
+            "You flip a fair coin three times and get heads each time. "
+            "What is the probability the next flip is heads? Reply with a fraction."
+        )
+        self.assertEqual(await classify_prompt(prompt), "logical_reasoning")
+
     async def test_conversational_ner_routing(self):
         prompts = [
             "From this blurb, pull out the people, companies, and places: Sundar Pichai leads Google.",

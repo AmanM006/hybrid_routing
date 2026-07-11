@@ -95,6 +95,22 @@ async def classify_prompt(prompt: str, local_llm_callable=None) -> str:
     if re.search(r"minimum.*(?:guarantee|certain|sure)|guarantee.*minimum|must draw|to guarantee|minimum number", prompt_lower):
         return "logical_reasoning"
 
+    # Coin/dice independence puzzles: "probability" + "fraction" score as math keywords
+    # but these are logical_reasoning, not arithmetic (fd-l03-style misroute).
+    if re.search(r"\bprobability\b", prompt_lower) and re.search(
+        r"\b(coin|flip|dice|roll|heads|tails|fair|independent|next flip|gambler)\b",
+        prompt_lower,
+    ):
+        return "logical_reasoning"
+
+    # Explicit summarization: source text may cite metrics (8% revenue) without being a math task.
+    # Gate only bare-% and digit↔percent patterns; keep real calculation cues.
+    wants_summarize = bool(SUMMARIZE_KEYWORDS.search(prompt_lower))
+    math_question_cue = bool(re.search(
+        r"\b(how many|how much|calculate|solve for|solve the|compute|evaluate|what is\s+\d+\s*%?\s*of)\b",
+        prompt_lower,
+    ))
+
     # High-priority math — before propositional "if...then" (word problems often say "if someone bought...")
     has_math_pattern = (
         re.search(r"\b\d+\b.*?(?:percent|%|remain|remains|remaining|total|each|sells|items)\b", prompt_lower) or
@@ -129,6 +145,15 @@ async def classify_prompt(prompt: str, local_llm_callable=None) -> str:
         (re.search(r"\b(perimeter|area|volume|radius|diameter|circumference|hypotenuse)\b", prompt_lower) and re.search(r"\d", prompt)) or
         (re.search(r"\b(length|width|height|base)\b", prompt_lower) and re.search(r"\d+\s*(cm|m|km|ft|in|mm)", prompt_lower))
     )
+    if wants_summarize and not math_question_cue:
+        has_math_pattern = (
+            has_math_pattern
+            and not re.search(r"\d+%", prompt_lower)
+            and not re.search(
+                r"\b\d+\b.*?(?:percent|%)\b|\b(?:percent|%)\b.*?\b\d+\b",
+                prompt_lower,
+            )
+        )
     if has_math_pattern:
         return "math_reasoning"
         
