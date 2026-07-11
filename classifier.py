@@ -129,7 +129,19 @@ async def classify_prompt(prompt: str, local_llm_callable=None) -> str:
         (re.search(r"\b(perimeter|area|volume|radius|diameter|circumference|hypotenuse)\b", prompt_lower) and re.search(r"\d", prompt)) or
         (re.search(r"\b(length|width|height|base)\b", prompt_lower) and re.search(r"\d+\s*(cm|m|km|ft|in|mm)", prompt_lower))
     )
-    if has_math_pattern:
+    # Summarization / NER instructions frequently contain "each" + a number
+    # (e.g. "label each as PERSON...", "each no longer than 15 words"), which
+    # otherwise trips has_math_pattern. These are never math problems, so an
+    # explicit summarize/extract-entity instruction vetoes the math shortcut and
+    # lets the downstream category scoring route them correctly.
+    instruction_override = bool(
+        re.search(r"summar(?:y|ize|ise|izing|ising)|bullet\s*point|tl;?dr", prompt_lower)
+        or re.search(
+            r"\b(extract|identify|label|tag)\b.{0,60}\b(entit|named entit|person|organization|organisation|location|date)\b",
+            prompt_lower,
+        )
+    )
+    if has_math_pattern and not instruction_override:
         return "math_reasoning"
         
     # Conditional/propositional logic: "if X then Y", "did it necessarily"
