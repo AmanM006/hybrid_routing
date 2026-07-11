@@ -300,6 +300,10 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
         # sentiment_classification: skip local tier — gemma returns label-only without justification
         # named_entity_recognition: deterministic first-pass, then direct-remote if that fails
     ]
+    # Accuracy experiment: the 1.5B local model has no semantic verifier for
+    # factual answers or summaries, so structurally valid mistakes are accepted.
+    # Keep the existing remote cascade and bypass only local answer generation.
+    local_answer_categories = set()
     
     tier_used = "unknown"
     model_name = "local"
@@ -347,7 +351,7 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
             logger.error(f"Task {task_id}: Logic deterministic solver raised an exception: {e}", exc_info=True)
     
     # 2. Local Tier (Easy categories)
-    if category in easy_categories and not local_disabled:
+    if category in local_answer_categories and not local_disabled:
         async with local_sem:
             tier_used = "local"
             try:
