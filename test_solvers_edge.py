@@ -328,32 +328,29 @@ check_logic(
     "Dan"
 )
 
-# --- Must fall through: syllogisms ---
+# --- Syllogisms (deterministic when pattern is unambiguous) ---
 check_logic(
-    "Syllogism: all mammals warm-blooded (fall through)",
+    "Syllogism: all mammals warm-blooded",
     "Every mammal is warm-blooded. A dolphin is a mammal. Is a dolphin warm-blooded? Answer yes or no.",
-    None, must_solve=False
+    "Yes",
 )
 
-# --- Must fall through: comparative chains ---
 check_logic(
-    "Comparative chain: Anna faster than Carlos (fall through)",
+    "Comparative chain: Anna faster than Carlos",
     "Anna is faster than Ben. Ben is faster than Carlos. Is Anna faster than Carlos? Answer yes or no.",
-    None, must_solve=False
+    "Yes",
 )
 
-# --- Must fall through: modus tollens ---
 check_logic(
-    "Modus tollens: power out lights off (fall through)",
+    "Modus tollens: power out lights off",
     "If the power goes out, the lights turn off. The lights are on. Did the power go out? Answer yes or no.",
-    None, must_solve=False
+    "No",
 )
 
-# --- Must fall through: pigeonhole ---
 check_logic(
-    "Pigeonhole: minimum marbles (fall through)",
+    "Pigeonhole: minimum marbles",
     "A bag contains 5 white marbles and 3 black marbles. What is the minimum number of marbles you must draw to guarantee at least one black marble?",
-    None, must_solve=False
+    "6",
 )
 
 # --- Must fall through: no unique solution (underdetermined) ---
@@ -384,17 +381,17 @@ check_logic(
     None, must_solve=False
 )
 
-# --- Original 4 logic tasks (confirm they still fall through to LLM) ---
+# --- Original 4 logic tasks (now deterministic in v37) ---
 check_logic(
-    "l-new-01: dolphin syllogism (fall through)",
+    "l-new-01: dolphin syllogism",
     "Every mammal is warm-blooded. A dolphin is a mammal. Is a dolphin warm-blooded? Answer yes or no.",
-    None, must_solve=False
+    "Yes",
 )
 
 check_logic(
-    "l-new-04: modus tollens lights (fall through)",
+    "l-new-04: modus tollens lights",
     "If the power goes out, the lights turn off. The lights are on. Did the power go out? Answer yes or no.",
-    None, must_solve=False
+    "No",
 )
 
 

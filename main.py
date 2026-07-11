@@ -29,6 +29,7 @@ from deterministic_solvers import (
     solve_math_deterministically,
     solve_ner_deterministically,
     solve_logic_deterministically,
+    solve_sentiment_deterministically,
 )
 
 
@@ -381,6 +382,19 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
                 return {"task_id": task_id, "answer": det_answer}
         except Exception as e:
             logger.error(f"Task {task_id}: Logic deterministic solver raised an exception: {e}", exc_info=True)
+
+    if category == "sentiment_classification":
+        try:
+            det_answer = solve_sentiment_deterministically(prompt)
+            if det_answer is not None and _validate_output(category, prompt, det_answer):
+                logger.info(f"Task {task_id}: Solved deterministically (sentiment). Answer={det_answer!r}")
+                latency = time.time() - start_time
+                _print_task_log(
+                    task_id, category, "deterministic", "none", 0, True, latency, fw_tokens=0
+                )
+                return {"task_id": task_id, "answer": det_answer}
+        except Exception as e:
+            logger.error(f"Task {task_id}: Sentiment deterministic solver raised an exception: {e}", exc_info=True)
     
     # 2. Local Tier (Easy categories)
     skip_local = (

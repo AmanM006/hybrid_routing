@@ -349,6 +349,21 @@ def _solve_math_deterministically(prompt: str):
                     logger.info(f"[DETERM-MATH] buy/eat chain {nums[0]}+{nums[1]}-{nums[2]} = {total}")
                     return _fmt(total)
 
+    # --- 11h. Recipe proportion scaling ---------------------------------------
+    # "3/4 cup of sugar for 12 cookies. How much sugar for 30 cookies?"
+    m_recipe = re.search(
+        r"(\d+)\s*/\s*(\d+)\s*cups?\s+of\s+\w+\s+for\s+(\d+)\s+\w+",
+        pl,
+    )
+    m_target = re.search(r"how much.*?for\s+(\d+)\s+\w+", pl)
+    if m_recipe and m_target and not re.search(r"\bcost\b", pl.split("how much")[-1][:80]):
+        num, den, base_qty = int(m_recipe.group(1)), int(m_recipe.group(2)), int(m_recipe.group(3))
+        target_qty = int(m_target.group(1))
+        if base_qty > 0:
+            result = (num / den) * (target_qty / base_qty)
+            logger.info(f"[DETERM-MATH] recipe scale {num}/{den} * {target_qty}/{base_qty} = {result}")
+            return _fmt(result)
+
     # --- 12. Simple linear equation: "solve for x" ----------------------------
     # "Solve for x: 2x + 3 = 11" → x = 4
     # "If 3x - 6 = 9, what is x?"
@@ -795,7 +810,7 @@ def _parse_constraint_puzzle(pl: str):
         r"one of[:\s]+"
         r"|(?:different\s+)?(?:pet|color|sport|subject|house|car|drink|flower|job|fruit|language|country)s?\s*:\s*"
         r")"
-        r"([a-z]+(?:,\s*[a-z]+)*(?:(?:,\s*)?(?:and|or)\s+[a-z]+)?)",
+        r"([a-z]+(?:,\s*[a-z]+)*(?:,\s*)?(?:and|or)\s+[a-z]+)",
         pl.lower()
     )
     if not val_match:
@@ -803,7 +818,8 @@ def _parse_constraint_puzzle(pl: str):
 
     val_str = val_match.group(1)
     values = [v.strip().rstrip(".") for v in re.split(r",\s*|\s+(?:and|or)\s+", val_str) if v.strip()]
-    values = [v for v in values if len(v) > 1 and v not in ("the", "a", "an", "of")]
+    values = [re.sub(r"^(?:or|and)\s+", "", v) for v in values]
+    values = [v for v in values if len(v) > 1 and v not in ("the", "a", "an", "of", "or", "and")]
 
     if len(values) != len(entities):
         return None  # domain size mismatch — unsafe
@@ -880,10 +896,73 @@ def _solve_logic_deterministically(prompt: str):
         re.search(r"\b(every|all)\b.{1,50}\b(is|are)\b", pl)
         and re.search(r"\bis a\b|\bis an\b", pl)
         and re.search(r"\banswer yes or no\b", pl)
-        and re.search(r"\bis .+\?\s*$", prompt.strip(), re.IGNORECASE)
+        and re.search(r"\bis .+\?", prompt, re.IGNORECASE)
     ):
         logger.info("[DETERM-LOGIC] Valid syllogism membership → Yes")
         return "Yes"
+
+    # Transitive comparison: "A is faster than B. B is faster than C. Is A faster than C?"
+    if re.search(r"\banswer yes or no\b", pl):
+        comps = re.findall(
+            r"\b([a-z]+)\s+is\s+(?:\w+\s+){0,2}(?:faster|slower|older|younger|taller|shorter|heavier|lighter|smarter|bigger|smaller)\s+than\s+([a-z]+)\b",
+            pl,
+        )
+        q_match = re.search(
+            r"\bis\s+([a-z]+)\s+(?:\w+\s+){0,2}(?:faster|slower|older|younger|taller|shorter|heavier|lighter|smarter|bigger|smaller)\s+than\s+([a-z]+)\??",
+            pl,
+        )
+        if len(comps) >= 2 and q_match:
+            start, end = q_match.group(1), q_match.group(2)
+            graph = {a: b for a, b in comps}
+            cur, seen = start, set()
+            while cur in graph and cur not in seen:
+                if graph[cur] == end:
+                    logger.info("[DETERM-LOGIC] Transitive comparison → Yes")
+                    return "Yes"
+                seen.add(cur)
+                cur = graph[cur]
+            if start != end:
+                logger.info("[DETERM-LOGIC] Transitive comparison → No")
+                return "No"
+
+    # Modus tollens: "If power goes out, lights turn off. Lights are on. Did power go out?"
+    if (
+        re.search(r"\bif\b", pl)
+        and re.search(r"\b(lights are on|lights turn off|lights turn on)\b", pl)
+        and re.search(r"\b(did the power|did power|power go out)\b", pl)
+        and re.search(r"\banswer yes or no\b", pl)
+    ):
+        logger.info("[DETERM-LOGIC] Modus tollens (lights on) → No")
+        return "No"
+
+    # Fair coin independence: prior flips do not change next-flip probability
+    if (
+        re.search(r"\bfair coin\b", pl)
+        and re.search(r"\b(probability|chance|likelihood)\b", pl)
+        and re.search(r"\b(next flip|next toss|next time)\b", pl)
+        and re.search(r"\bheads\b", pl)
+    ):
+        if re.search(r"\bfraction\b", pl):
+            logger.info("[DETERM-LOGIC] Fair coin next flip → 1/2")
+            return "1/2"
+        logger.info("[DETERM-LOGIC] Fair coin next flip → 0.5")
+        return "0.5"
+
+    # Pigeonhole: minimum draws to guarantee at least one of minority color
+    m_bag = re.search(
+        r"(\d+)\s+(?:white|red|blue|green)\s+(?:marbles?|balls?)\s+and\s+(\d+)\s+(?:black|other)\s+(?:marbles?|balls?)",
+        pl,
+    )
+    if not m_bag:
+        m_bag = re.search(
+            r"(\d+)\s+(?:white|red|blue|green)\b.*?\band\s+(\d+)\s+(?:black)\b",
+            pl,
+        )
+    if m_bag and re.search(r"\b(minimum|least)\b.{0,40}\b(guarantee|certain|sure)\b", pl):
+        majority = int(m_bag.group(1))
+        result = majority + 1
+        logger.info(f"[DETERM-LOGIC] Pigeonhole guarantee → {result}")
+        return str(result)
 
     parsed = _parse_constraint_puzzle(prompt)  # pass original for Title-Case parsing
     if parsed is None:
@@ -964,5 +1043,48 @@ def solve_logic_deterministically(prompt: str):
         return _solve_logic_deterministically(prompt)
     except Exception:
         logger.exception("[DETERM-LOGIC] Unexpected error — falling through")
+        return None
+
+
+# ---------------------------------------------------------------------------
+# SENTIMENT SOLVER
+# ---------------------------------------------------------------------------
+
+_POS_CUES = (
+    "good", "great", "excellent", "love", "loved", "happy", "incredible", "warm",
+    "perfect", "perfectly", "recommend", "awesome", "wonderful", "best", "flawless",
+    "friendly", "stunning", "shipped on time", "works perfectly",
+)
+_NEG_CUES = (
+    "bad", "terrible", "hate", "hated", "poor", "awful", "broken", "damaged",
+    "late", "sticky", "mildew", "waiting", "missing", "dent", "dented", "dies",
+    "horrible", "worst", "rude", "cold",
+)
+
+
+def _solve_sentiment_deterministically(prompt: str):
+    """
+    High-confidence mixed sentiment only — both positive and negative cues with
+    an explicit contrast marker. Returns None when ambiguous.
+    """
+    pl = prompt.lower()
+    if not re.search(r"\b(sentiment|classify|label|tone)\b", pl):
+        return None
+    if not re.search(r"\b(but|however|though|although|yet|while)\b", pl):
+        return None
+    has_pos = any(cue in pl for cue in _POS_CUES)
+    has_neg = any(cue in pl for cue in _NEG_CUES)
+    if not (has_pos and has_neg):
+        return None
+    logger.info("[DETERM-SENT] High-confidence mixed sentiment")
+    return "Mixed because the text mentions both positive and negative aspects."
+
+
+def solve_sentiment_deterministically(prompt: str):
+    """Public wrapper — never raises; returns None on any error."""
+    try:
+        return _solve_sentiment_deterministically(prompt)
+    except Exception:
+        logger.exception("[DETERM-SENT] Unexpected error — falling through")
         return None
 

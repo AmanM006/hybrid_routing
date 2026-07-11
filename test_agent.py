@@ -12,7 +12,7 @@ os.environ["ALLOWED_MODELS"] = "accounts/fireworks/models/llama-v3p1-8b-instruct
 from classifier import classify_prompt
 from validators import validate_category_output, coerce_ner_output
 from client import FireworksClient, get_emergency_fallback, get_max_tokens
-from deterministic_solvers import solve_ner_deterministically
+from deterministic_solvers import solve_ner_deterministically, solve_sentiment_deterministically
 from main import classify_model_roles
 import main
 
@@ -228,6 +228,15 @@ class TestGeneralPurposeAgent(unittest.IsolatedAsyncioTestCase):
         # Missing usage must not raise or change counters
         client._record_usage(MagicMock(usage=None), "minimax-m3", "factual_knowledge")
         self.assertEqual(client.total_calls, 1)
+
+    def test_mixed_sentiment_deterministic(self):
+        prompt = (
+            "What's the overall sentiment here? "
+            "'Food was incredible and service was warm, but we waited 45 minutes and the table was sticky.'"
+        )
+        result = solve_sentiment_deterministically(prompt)
+        self.assertIsNotNone(result)
+        self.assertTrue(validate_category_output("sentiment_classification", prompt, result))
 
     def test_ner_partial_answers_fall_through_and_heading_repair(self):
         # Missing event/product/date candidates must not be accepted as a
