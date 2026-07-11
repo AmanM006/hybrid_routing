@@ -1,0 +1,74 @@
+[
+  {
+    "task_id": "sf-01",
+    "prompt": "Classify the sentiment of this product review: 'Great camera quality and battery life, but the screen flickers constantly and support ignored my ticket.'",
+    "category": "sentiment_classification",
+    "gold": "mixed"
+  },
+  {
+    "task_id": "sf-02",
+    "prompt": "Sentiment of this tweet: 'Just got promoted!! Best day ever.'",
+    "category": "sentiment_classification",
+    "gold": "positive"
+  },
+  {
+    "task_id": "sf-03",
+    "prompt": "What's the sentiment here? 'worst flight of my life. never again.'",
+    "category": "sentiment_classification",
+    "gold": "negative"
+  },
+  {
+    "task_id": "sf-04",
+    "prompt": "Rate the sentiment of this formal survey response: 'The onboarding process was thorough and well-documented. However, response times from the helpdesk exceeded our SLA on three occasions this quarter.'",
+    "category": "sentiment_classification",
+    "gold": "mixed"
+  },
+  {
+    "task_id": "sf-05",
+    "prompt": "Classify sentiment: 'Oh sure, waiting three hours for a table was exactly what I wanted on my anniversary.'",
+    "category": "sentiment_classification",
+    "gold": "negative"
+  },
+  {
+    "task_id": "sf-06",
+    "prompt": "Sentiment check: 'The package arrived on Tuesday. It contained twelve items as listed on the invoice.'",
+    "category": "sentiment_classification",
+    "gold": "neutral"
+  },
+  {
+    "task_id": "sf-07",
+    "prompt": "Label the sentiment: 'Love it.'",
+    "category": "sentiment_classification",
+    "gold": "positive"
+  },
+  {
+    "task_id": "sf-08",
+    "prompt": "How positive or negative is this? 'Total garbage.'",
+    "category": "sentiment_classification",
+    "gold": "negative"
+  },
+  {
+    "task_id": "sf-09",
+    "prompt": "Classify sentiment of this Yelp-style comment: 'Staff were friendly but the food was cold and overpriced.'",
+    "category": "sentiment_classification",
+    "gold": "mixed"
+  },
+  {
+    "task_id": "sf-10",
+    "prompt": "Sentiment of: 'Would definitely book again — already told all my friends.'",
+    "category": "sentiment_classification",
+    "gold": "positive"
+  },
+  {
+    "task_id": "sf-11",
+    "prompt": "Classify: 'Eh, it's fine I guess. Nothing special.'",
+    "category": "sentiment_classification",
+    "gold": "neutral"
+  },
+  {
+    "task_id": "sf-12",
+    "prompt": "App store review sentiment: '5 stars for features, 1 star for crashing every update.'",
+    "category": "sentiment_classification",
+    "gold": "mixed"
+  }
+]

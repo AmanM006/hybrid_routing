@@ -12,7 +12,7 @@ MODELS = {
     ),
 }
 
-DEFAULT_KEY = os.environ.get("LOCAL_MODEL_KEY", "3b")
+DEFAULT_KEY = os.environ.get("LOCAL_MODEL_KEY", "1.5b")
 MODEL_URL, MODEL_FILENAME = MODELS[DEFAULT_KEY]
 MODEL_DIR = os.path.join(os.path.dirname(__file__), "models")
 MODEL_PATH = os.path.join(MODEL_DIR, MODEL_FILENAME)

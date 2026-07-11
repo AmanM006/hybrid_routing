@@ -289,7 +289,29 @@ class TestGeneralPurposeAgent(unittest.IsolatedAsyncioTestCase):
         )
 
 
-    def test_summarization_validator(self):
+    def test_logic_answer_prefix_stripped(self):
+        client = FireworksClient("k", "https://example.com")
+        self.assertEqual(client._scrub_cot("Answer: juice", "logical_reasoning"), "juice")
+        self.assertEqual(client._scrub_cot("Answer: 1/2", "logical_reasoning"), "1/2")
+
+    def test_code_debug_deterministic_not_used_in_pipeline(self):
+        """Generic empty-input patch must not bypass remote code models."""
+        from deterministic_solvers import solve_code_debug_deterministically
+        prompt = (
+            "Fix off-by-one error in sum:\n"
+            "def total(nums):\n"
+            "    s = 0\n"
+            "    for i in range(len(nums)):\n"
+            "        s += nums[i+1]\n"
+            "    return s\n"
+            "Also handle empty input."
+        )
+        # Solver may return a patch — pipeline must not call it (removed in v27).
+        patch = solve_code_debug_deterministically(prompt)
+        import main
+        src = open(main.__file__, encoding="utf-8").read()
+        self.assertNotIn("solve_code_debug_deterministically", src)
+
         """
         Tests summary length constraints.
         """

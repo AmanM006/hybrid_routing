@@ -37,14 +37,17 @@ SYSTEM_PROMPTS = {
         "Solve the math problem. Show minimal steps, end with 'Answer: <value>' on its own line."
     ),
     "logical_reasoning": (
-        "Solve using only stated facts. End with exactly one line: Answer: <value>. "
-        "No steps, headings, markdown, or explanation."
+        "Solve carefully using only the stated facts. Avoid affirming the consequent, "
+        "converse errors, and assumptions not guaranteed by the premises. "
+        "Show minimal steps, then end with 'Answer: <value>' on its own line."
     ),
     "code_generation": (
         "Write complete functional code in a single markdown code block. No explanation."
     ),
     "code_debugging": (
-        "Fix the bug. Output one ```python code block only. No reasoning or explanation."
+        "Fix every stated bug and edge case. Mentally test the corrected code against "
+        "the request, including empty inputs and boundary cases. Output one corrected "
+        "markdown code block only."
     ),
 }
 
@@ -273,8 +276,7 @@ class FireworksClient:
         if category in ["logical_reasoning", "math_reasoning"]:
             answer_match = re.search(r"(?im)^answer:\s*(.+)$", text.strip())
             if answer_match:
-                return f"Answer: {answer_match.group(1).strip()}"
-            # Drop markdown headings / bold preamble; keep last non-empty substantive line
+                return answer_match.group(1).strip()
             lines = [ln.strip() for ln in text.strip().splitlines() if ln.strip()]
             lines = [
                 ln for ln in lines
@@ -285,7 +287,7 @@ class FireworksClient:
             if lines:
                 last = lines[-1]
                 if len(last.split()) <= 20:
-                    return last if last.lower().startswith("answer:") else f"Answer: {last}"
+                    return re.sub(r"^[Aa]nswer:\s*", "", last).strip()
 
         # For NER: prefer embedded JSON block over line-scrubbing (preserves Unicode names)
         if category == "named_entity_recognition":
@@ -393,7 +395,7 @@ class FireworksClient:
         _USER_SUFFIXES = {
             "sentiment_classification": "\n\nRequired format: <Positive|Negative|Neutral|Mixed> because <brief reason>. You MUST use the word because.",
             "math_reasoning": "\n\nAnswer:",
-            "logical_reasoning": "\n\nAnswer: (one line only, no explanation)",
+            "logical_reasoning": "\n\nAnswer:",
             "code_debugging": "\n\nReturn one corrected ```python code block only. No explanation.",
             "code_generation": "\n\nReturn one ``` code block only. No explanation.",
             "named_entity_recognition": (

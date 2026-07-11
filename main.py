@@ -27,7 +27,6 @@ from validators import validate_category_output, validate_ner, verify_math_self_
 from client import FireworksClient, get_max_tokens, get_emergency_fallback
 from deterministic_solvers import (
     solve_math_deterministically,
-    solve_code_debug_deterministically,
     solve_ner_deterministically,
     solve_logic_deterministically,
 )
@@ -36,7 +35,7 @@ from deterministic_solvers import (
 # Model configuration
 MODEL_DIR = os.path.join(os.path.dirname(__file__), "models")
 LOCAL_MODEL_FILE = os.environ.get(
-    "LOCAL_MODEL_FILE", "qwen2.5-3b-instruct-q4_k_m.gguf"
+    "LOCAL_MODEL_FILE", "qwen2.5-1.5b-instruct-q4_k_m.gguf"
 )
 MODEL_PATH = os.path.join(MODEL_DIR, LOCAL_MODEL_FILE)
 
@@ -72,35 +71,27 @@ def start_local_server() -> subprocess.Popen:
         
     try:
         logger.info(f"Launching local llama-server from: {binary} using {MODEL_PATH}...")
-        llama_threads = os.environ.get("LLAMA_THREADS", "2")
         proc = subprocess.Popen(
-            [binary, "-m", MODEL_PATH, "--port", "8085", "-c", "1024", "-t", llama_threads],
+            [binary, "-m", MODEL_PATH, "--port", "8085", "-c", "1024", "-t", "4"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL
         )
         
         # Poll health endpoint: http://127.0.0.1:8085/health
         health_url = "http://127.0.0.1:8085/health"
-        startup_polls = int(os.environ.get("LOCAL_STARTUP_POLLS", "120"))  # 120 × 0.5s = 60s max
-        for i in range(startup_polls):
+        for i in range(30):
             try:
                 req = urllib.request.Request(health_url)
                 with urllib.request.urlopen(req, timeout=1.0) as response:
                     if response.status == 200:
-                        logger.info(
-                            f"Local llama-server started successfully and is healthy! "
-                            f"(ready after ~{(i + 1) * 0.5:.1f}s)"
-                        )
+                        logger.info("Local llama-server started successfully and is healthy!")
                         local_disabled = False
                         return proc
             except Exception:
                 pass
             time.sleep(0.5)
             
-        logger.warning(
-            f"Local llama-server failed to report healthy in {startup_polls * 0.5:.0f} seconds. "
-            "Terminating process."
-        )
+        logger.warning("Local llama-server failed to report healthy in 15 seconds. Terminating process.")
         proc.terminate()
         local_disabled = True
         return None
@@ -519,18 +510,6 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
                     answer = get_emergency_fallback(category, prompt)
                             
             elif category in ["code_debugging", "code_generation"]:
-                if category == "code_debugging":
-                    try:
-                        det_answer = solve_code_debug_deterministically(prompt)
-                        if det_answer is not None and _validate_output(category, prompt, det_answer):
-                            tier_used = "deterministic"
-                            model_name = "none"
-                            answer = det_answer
-                            validation_pass = True
-                            logger.info(f"Task {task_id}: Solved deterministically (code debug).")
-                    except Exception as e:
-                        logger.error(f"Task {task_id}: Code debug deterministic solver failed: {e}")
-
                 if not validation_pass:
                     # Try code model first
                     if roles.get("code"):
@@ -849,7 +828,7 @@ async def main():
     proc = start_local_server()
     
     # 5. Run tasks concurrently
-    max_local_concurrency = int(os.environ.get("MAX_LOCAL_CONCURRENCY", "2"))
+    max_local_concurrency = int(os.environ.get("MAX_LOCAL_CONCURRENCY", "3"))
     max_remote_concurrency = int(os.environ.get("MAX_REMOTE_CONCURRENCY", "4"))
 
     
