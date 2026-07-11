@@ -255,6 +255,31 @@ class TestGeneralPurposeAgent(unittest.IsolatedAsyncioTestCase):
         # 10 words (exceeds limit + buffer)
         self.assertFalse(validate_category_output("summarization", prompt_limit, "The quick brown fox jumps over the lazy sleeping dog today."))
 
+        prompt_bullets = (
+            "Summarize the following passage in exactly three bullet points, each no longer than 15 words: "
+            "Remote work has transformed how companies operate globally."
+        )
+        good_bullets = (
+            "- Remote work boosts flexibility and work-life balance.\n"
+            "- Collaboration and culture remain key challenges.\n"
+            "- Companies invest in digital tools and offices."
+        )
+        self.assertTrue(validate_category_output("summarization", prompt_bullets, good_bullets))
+        self.assertFalse(validate_category_output(
+            "summarization",
+            prompt_bullets,
+            "- This bullet point definitely contains way more than fifteen words which should fail validation checks.",
+        ))
+        self.assertFalse(validate_category_output("summarization", prompt_bullets, "- Only one bullet here."))
+
+        # Per-bullet limits must not apply a total-output word cap (3×15 = 45 words is fine).
+        long_but_valid_bullets = (
+            "- Remote work boosts flexibility, reduced commutes, and better work-life balance overall.\n"
+            "- Collaboration, company culture, and blurred personal-professional boundaries remain challenges.\n"
+            "- Organisations invest in digital collaboration tools and rethink office space usage."
+        )
+        self.assertTrue(validate_category_output("summarization", prompt_bullets, long_but_valid_bullets))
+
     def test_factual_validator(self):
         """
         Tests factual response validation.

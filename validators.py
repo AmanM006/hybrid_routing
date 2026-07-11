@@ -5,6 +5,18 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+_COUNT_WORDS = {
+    "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+    "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+}
+
+
+def _parse_count(token: str) -> int | None:
+    token = token.lower()
+    if token.isdigit():
+        return int(token)
+    return _COUNT_WORDS.get(token)
+
 # Unicode-aware word token for international names/places (François, München, José)
 _U_WORD = r"[\w\u00C0-\u024F\u1E00-\u1EFF]"
 
@@ -228,6 +240,18 @@ def validate_sentiment(prompt: str, output: str) -> bool:
 
     return True
 
+def _extract_bullets(text: str) -> list[str]:
+    """Return bullet item texts from line-based bullet output."""
+    bullets = []
+    for line in text.strip().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        match = re.match(r"^[-*•]\s+(.+)$", line) or re.match(r"^\d+[.)]\s+(.+)$", line)
+        if match:
+            bullets.append(match.group(1).strip())
+    return bullets
+
 def validate_summarization(prompt: str, output: str) -> bool:
     """
     summarization: output must be non-empty, respect explicit length/format constraint in prompt.
@@ -248,25 +272,56 @@ def validate_summarization(prompt: str, output: str) -> bool:
         return False
             
     prompt_lower = prompt.lower()
-    
-    # Extract word count constraint e.g., "max 50 words", "under 30 words"
-    word_limit_match = re.search(r"(\d+)\s*words?\s*(?:or less|limit|max|cap)?", prompt_lower)
-    if not word_limit_match:
-        word_limit_match = re.search(r"(?:max|limit|under|at most)\s*(\d+)\s*words?", prompt_lower)
-        
-    if word_limit_match:
-        limit = int(word_limit_match.group(1))
-        word_count = len(output_clean.split())
-        # Hard cap: reject if > 2× limit (prevents rambling)
-        hard_cap = limit * 2
-        if word_count > hard_cap:
-            logger.warning(f"Summarization Validation Failed: Word count {word_count} exceeds 2x hard cap {hard_cap}.")
-            return False
-        # Soft cap: give a small 10% + 5 words buffer
-        allowed_max = limit + max(5, int(limit * 0.10))
-        if word_count > allowed_max:
-            logger.warning(f"Summarization Validation Failed: Word count {word_count} exceeds limit {limit} (allowed max: {allowed_max}).")
-            return False
+
+    per_bullet_word_match = re.search(
+        r"\beach\s+(?:no longer than|under|at most|max(?:imum)?|up to)?\s*(\d+)\s*words?\b",
+        prompt_lower,
+    )
+    bullet_count_exact = re.search(
+        r"\bexactly\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+bullet\s*points?\b",
+        prompt_lower,
+    )
+
+    if per_bullet_word_match or bullet_count_exact:
+        bullets = _extract_bullets(output_clean)
+        if bullet_count_exact:
+            expected = _parse_count(bullet_count_exact.group(1))
+            if expected is None or len(bullets) != expected:
+                logger.warning(
+                    f"Summarization Validation Failed: Expected exactly {expected} bullet points, got {len(bullets)}."
+                )
+                return False
+        if per_bullet_word_match:
+            per_limit = int(per_bullet_word_match.group(1))
+            if not bullets:
+                logger.warning("Summarization Validation Failed: Expected bullet-point format.")
+                return False
+            for idx, bullet in enumerate(bullets, 1):
+                bullet_words = len(bullet.split())
+                if bullet_words > per_limit:
+                    logger.warning(
+                        f"Summarization Validation Failed: Bullet {idx} has {bullet_words} words, exceeds per-bullet limit {per_limit}."
+                    )
+                    return False
+    else:
+        # Extract word count constraint e.g., "max 50 words", "under 30 words"
+        word_limit_match = re.search(r"(\d+)\s*words?\s*(?:or less|limit|max|cap)?", prompt_lower)
+        if not word_limit_match:
+            word_limit_match = re.search(r"(?:max|limit|under|at most)\s*(\d+)\s*words?", prompt_lower)
+
+        if word_limit_match:
+            limit = int(word_limit_match.group(1))
+            word_count = len(output_clean.split())
+            # Hard cap: reject if > 2× limit (prevents rambling)
+            hard_cap = limit * 2
+            if word_count > hard_cap:
+                logger.warning(f"Summarization Validation Failed: Word count {word_count} exceeds 2x hard cap {hard_cap}.")
+                return False
+            # Soft cap: give a small 10% + 5 words buffer
+            allowed_max = limit + max(5, int(limit * 0.10))
+            if word_count > allowed_max:
+                logger.warning(f"Summarization Validation Failed: Word count {word_count} exceeds limit {limit} (allowed max: {allowed_max}).")
+                return False
             
     # Extract sentence count constraint e.g., "exactly 3 sentences", "in 2 sentences"
     sentence_limit_match = re.search(r"(\d+)\s*sentences?", prompt_lower)
