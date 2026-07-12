@@ -69,8 +69,9 @@ def start_local_server() -> subprocess.Popen:
         
     try:
         logger.info(f"Launching local llama-server from: {binary} using {MODEL_PATH}...")
+        threads = os.environ.get("LLAMA_THREADS", "2")
         proc = subprocess.Popen(
-            [binary, "-m", MODEL_PATH, "--port", "8085", "-c", "1024", "-t", "4"],
+            [binary, "-m", MODEL_PATH, "--port", "8085", "-c", "1024", "-t", threads],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL
         )
@@ -111,7 +112,7 @@ async def call_local_model(system_prompt: str, user_prompt: str, max_tokens: int
     
     async with aiohttp.ClientSession() as session:
         try:
-            async with session.post(url, json=payload, timeout=15.0) as resp:
+            async with session.post(url, json=payload, timeout=45.0) as resp:
                 if resp.status == 200:
                     data = await resp.json()
                     return data["choices"][0]["message"]["content"].strip()
@@ -396,35 +397,17 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
         except Exception as e:
             logger.error(f"Task {task_id}: Sentiment deterministic solver raised an exception: {e}", exc_info=True)
     
-    # 2. Local Tier (Easy categories)
-    skip_local = (
-        category == "summarization"
-        and re.search(
-            r"\bexactly\s+(?:\d+|one|two|three|four|five)\s+sentences?\b",
-            prompt.lower(),
-        )
-    )
-    if category in easy_categories and not local_disabled and not skip_local:
+    # 2. Local Tier — summarization only (bench-proven; factual stays remote for accuracy)
+    if category == "summarization" and not local_disabled:
         async with local_sem:
             tier_used = "local"
             try:
                 system_prompt = SYSTEM_PROMPTS.get(category, "Answer the query.")
                 user_prompt = prompt + get_user_prompt_suffix(category, prompt)
-                # Token budget per category: summarization needs room for a full sentence,
-                # sentiment needs label+justification, NER needs JSON, others stay concise.
-                if category == "summarization":
-                    max_tokens = get_max_tokens(category, prompt)
-                elif category == "sentiment_classification":
-                    max_tokens = 100
-                elif category == "named_entity_recognition":
-                    max_tokens = 70
-                elif category == "factual_knowledge":
-                    max_tokens = get_max_tokens(category, prompt)
-                else:
-                    max_tokens = min(35, get_max_tokens(category, prompt))
+                max_tokens = get_max_tokens(category, prompt)
                 raw_answer = await asyncio.wait_for(
                     call_local_model(system_prompt, user_prompt, max_tokens),
-                    timeout=40.0
+                    timeout=45.0
                 )
                 answer = client._scrub_cot(raw_answer, category)
                 if category == "summarization":
@@ -839,7 +822,7 @@ async def main():
     proc = start_local_server()
     
     # 5. Run tasks concurrently
-    max_local_concurrency = int(os.environ.get("MAX_LOCAL_CONCURRENCY", "3"))
+    max_local_concurrency = int(os.environ.get("MAX_LOCAL_CONCURRENCY", "1"))
     max_remote_concurrency = int(os.environ.get("MAX_REMOTE_CONCURRENCY", "4"))
 
     
