@@ -59,56 +59,46 @@ SYSTEM_PROMPTS = {
 }
 
 def get_max_tokens(category: str, prompt: str) -> int:
-    """
-    Returns appropriate max_tokens constraint based on category and prompt constraints.
-    """
+    """Tight caps — enough for correct answers, minimal Fireworks spend."""
     if category == "named_entity_recognition":
-        return 120
+        return 80
     elif category == "sentiment_classification":
-        return 55
+        return 40
     elif category == "summarization":
         prompt_lower = prompt.lower()
         if re.search(r"bullet\s*points?", prompt_lower):
-            return 120
+            return 90
         if re.search(r"\bexactly\s+(?:\d+|one|two|three|four|five)\s+sentences?\b", prompt_lower):
-            return 160
+            return 120
         word_limit_match = re.search(r"(\d+)\s*words?", prompt_lower)
         if word_limit_match:
             limit = int(word_limit_match.group(1))
-            return max(40, limit * 2 + 8)
-        return 120
+            return max(35, limit * 2 + 6)
+        return 90
     elif category == "factual_knowledge":
         prompt_lower = prompt.lower()
         if re.search(
             r"\b(explain|describe|difference|compare|briefly|how (?:each|each works|do|does)|what is the difference)\b",
             prompt_lower,
         ):
-            return 300
-        return 100
+            return 220
+        return 70
     elif category == "math_reasoning":
-        return 120
+        return 80
     elif category == "logical_reasoning":
-        return 220
+        return 150
     elif category in ["code_generation", "code_debugging"]:
-        return 380
-    return 100
+        return 280
+    return 80
 
 def get_user_prompt_suffix(category: str, prompt: str) -> str:
-    """Category-specific user suffix shared by remote API and local tier."""
+    """Minimal suffix — format hint only, no token-heavy instructions."""
     if category == "sentiment_classification":
-        return (
-            "\n\nRequired format: <Positive|Negative|Neutral|Mixed> because <brief reason>. "
-            "You MUST use the word because."
-        )
-    if category == "math_reasoning":
-        return "\n\nAnswer:"
-    if category == "logical_reasoning":
+        return "\n\n<Label> because <reason>."
+    if category in ("math_reasoning", "logical_reasoning"):
         return "\n\nAnswer:"
     if category == "named_entity_recognition":
-        return (
-            "\n\nReturn every named person, organization, location, event, product, and date. "
-            "Output only {\"entities\":[{\"text\":\"...\",\"type\":\"...\"}]} JSON."
-        )
+        return '\n\nJSON only: {"entities":[{"text":"...","type":"..."}]}'
     if category == "summarization":
         exact_sent = re.search(
             r"\bexactly\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+sentences?\b",
@@ -117,20 +107,15 @@ def get_user_prompt_suffix(category: str, prompt: str) -> str:
         if exact_sent:
             n = _parse_count_token(exact_sent.group(1))
             if n == 2:
-                return (
-                    "\n\nWrite exactly 2 complete sentences. "
-                    "Sentence 1: key opportunities, benefits, or applications from the passage "
-                    "(e.g. image analysis, prediction, pattern recognition). "
-                    "Sentence 2: key challenges, risks, or concerns from the passage "
-                    "(e.g. interpretability, privacy, liability, bias, regulatory lag). "
-                    "Use specific details from the text; cover both sides."
-                )
+                return "\n\nExactly 2 sentences: benefits/applications, then challenges/risks."
             if n is not None:
-                return f"\n\nWrite exactly {n} complete sentences. No more, no fewer."
+                return f"\n\nExactly {n} sentences."
+        if re.search(r"bullet\s*points?", prompt.lower()):
+            return "\n\nBullet points only, respect word limits."
         return "\n\nSummary:"
     if category == "factual_knowledge":
-        return "\n\nAnswer completely in plain prose. No markdown."
-    return "\n\nAnswer only."
+        return ""
+    return ""
 
 def get_emergency_fallback(category: str, prompt: str) -> str:
     """
@@ -380,7 +365,7 @@ class FireworksClient:
             {"role": "user", "content": prompt + user_suffix}
         ]
         
-        attempts = 5
+        attempts = 2
         import random
         for attempt in range(attempts):
             try:
