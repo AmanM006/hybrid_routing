@@ -83,7 +83,7 @@ def get_max_tokens(category: str, prompt: str) -> int:
             r"\b(explain|describe|difference|compare|briefly|how (?:each|each works|do|does)|what is the difference)\b",
             prompt_lower,
         ):
-            return 300
+            return 250
         return 100
     elif category == "math_reasoning":
         return 120
@@ -96,19 +96,13 @@ def get_max_tokens(category: str, prompt: str) -> int:
 def get_user_prompt_suffix(category: str, prompt: str) -> str:
     """Category-specific user suffix shared by remote API and local tier."""
     if category == "sentiment_classification":
-        return (
-            "\n\nRequired format: <Positive|Negative|Neutral|Mixed> because <brief reason>. "
-            "You MUST use the word because."
-        )
+        return "\n\n<Label> because <brief reason>."
     if category == "math_reasoning":
         return "\n\nAnswer:"
     if category == "logical_reasoning":
         return "\n\nAnswer:"
     if category == "named_entity_recognition":
-        return (
-            "\n\nReturn every named person, organization, location, event, product, and date. "
-            "Output only {\"entities\":[{\"text\":\"...\",\"type\":\"...\"}]} JSON."
-        )
+        return '\n\nOutput only {"entities":[{"text":"...","type":"..."}]} JSON.'
     if category == "summarization":
         exact_sent = re.search(
             r"\bexactly\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+sentences?\b",
@@ -118,18 +112,14 @@ def get_user_prompt_suffix(category: str, prompt: str) -> str:
             n = _parse_count_token(exact_sent.group(1))
             if n == 2:
                 return (
-                    "\n\nWrite exactly 2 complete sentences. "
-                    "Sentence 1: key opportunities, benefits, or applications from the passage "
-                    "(e.g. image analysis, prediction, pattern recognition). "
-                    "Sentence 2: key challenges, risks, or concerns from the passage "
-                    "(e.g. interpretability, privacy, liability, bias, regulatory lag). "
-                    "Use specific details from the text; cover both sides."
+                    "\n\nExactly 2 sentences: sentence 1 = benefits/applications; "
+                    "sentence 2 = challenges/risks. Use details from the text."
                 )
             if n is not None:
-                return f"\n\nWrite exactly {n} complete sentences. No more, no fewer."
+                return f"\n\nExactly {n} complete sentences."
         return "\n\nSummary:"
     if category == "factual_knowledge":
-        return "\n\nAnswer completely in plain prose. No markdown."
+        return "\n\nPlain prose. No markdown."
     return "\n\nAnswer only."
 
 def get_emergency_fallback(category: str, prompt: str) -> str:

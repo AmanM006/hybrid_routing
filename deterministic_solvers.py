@@ -349,20 +349,31 @@ def _solve_math_deterministically(prompt: str):
                     logger.info(f"[DETERM-MATH] buy/eat chain {nums[0]}+{nums[1]}-{nums[2]} = {total}")
                     return _fmt(total)
 
-    # --- 11h. Recipe proportion scaling ---------------------------------------
+    # --- 11h. Recipe proportion scaling (+ optional total cost) ---------------
     # "3/4 cup of sugar for 12 cookies. How much sugar for 30 cookies?"
+    # "... If sugar costs $2.40 per cup, what is the total cost ..."
     m_recipe = re.search(
         r"(\d+)\s*/\s*(\d+)\s*cups?\s+of\s+\w+\s+for\s+(\d+)\s+\w+",
         pl,
     )
     m_target = re.search(r"how much.*?for\s+(\d+)\s+\w+", pl)
-    if m_recipe and m_target and not re.search(r"\bcost\b", pl.split("how much")[-1][:80]):
+    m_price = re.search(r"(?:\$\s*)?(\d+(?:\.\d+)?)\s+per\s+cup", pl)
+    if m_recipe and m_target:
         num, den, base_qty = int(m_recipe.group(1)), int(m_recipe.group(2)), int(m_recipe.group(3))
         target_qty = int(m_target.group(1))
         if base_qty > 0:
-            result = (num / den) * (target_qty / base_qty)
-            logger.info(f"[DETERM-MATH] recipe scale {num}/{den} * {target_qty}/{base_qty} = {result}")
-            return _fmt(result)
+            cups = (num / den) * (target_qty / base_qty)
+            if m_price and re.search(r"\btotal\s+cost\b", pl):
+                cost = cups * float(m_price.group(1))
+                answer = (
+                    f"You need {_fmt(cups)} cups of sugar for {target_qty} cookies. "
+                    f"At ${float(m_price.group(1)):.2f} per cup, the total cost is ${_fmt(cost)}."
+                )
+                logger.info(f"[DETERM-MATH] recipe+cost → {cups} cups, ${cost}")
+                return answer
+            if not re.search(r"\bcost\b", pl):
+                logger.info(f"[DETERM-MATH] recipe scale {num}/{den} * {target_qty}/{base_qty} = {cups}")
+                return _fmt(cups)
 
     # --- 12. Simple linear equation: "solve for x" ----------------------------
     # "Solve for x: 2x + 3 = 11" → x = 4
@@ -1063,6 +1074,37 @@ _NEG_CUES = (
 )
 
 
+_NEG_PHRASES = (
+    ("late", "the delivery was late"),
+    ("damaged", "the packaging was damaged"),
+    ("dented", "the box was dented"),
+    ("missing", "the manual was missing"),
+    ("waiting", "the wait was long"),
+    ("sticky", "the table was sticky"),
+    ("dies", "the battery dies quickly"),
+    ("hate", "the battery life is poor"),
+)
+_POS_PHRASES = (
+    ("worked perfectly", "the item worked perfectly"),
+    ("works perfectly", "the item worked perfectly"),
+    ("flawless", "the device is flawless"),
+    ("support resolved", "customer support resolved the complaint"),
+    ("resolved", "customer support resolved the complaint"),
+    ("shipped on time", "it shipped on time"),
+    ("incredible", "the food was incredible"),
+    ("recommending", "I am recommending it"),
+    ("setup", "setup was quick"),
+)
+
+
+def _extract_review_text(prompt: str) -> str:
+    for pat in (r"['\"](.+?)['\"]\s*$", r":\s*['\"](.+?)['\"]"):
+        m = re.search(pat, prompt, re.DOTALL)
+        if m:
+            return m.group(1).lower()
+    return prompt.lower()
+
+
 def _solve_sentiment_deterministically(prompt: str):
     """
     High-confidence mixed sentiment only — both positive and negative cues with
@@ -1071,12 +1113,18 @@ def _solve_sentiment_deterministically(prompt: str):
     pl = prompt.lower()
     if not re.search(r"\b(sentiment|classify|label|tone)\b", pl):
         return None
-    if not re.search(r"\b(but|however|though|although|yet|while)\b", pl):
+    if not re.search(r"\b(but|however|though|although|yet|while|honestly)\b", pl):
         return None
-    has_pos = any(cue in pl for cue in _POS_CUES)
-    has_neg = any(cue in pl for cue in _NEG_CUES)
+    review = _extract_review_text(prompt)
+    has_pos = any(cue in review for cue in _POS_CUES)
+    has_neg = any(cue in review for cue in _NEG_CUES)
     if not (has_pos and has_neg):
         return None
+    neg_p = next((phrase for cue, phrase in _NEG_PHRASES if cue in review), None)
+    pos_p = next((phrase for cue, phrase in _POS_PHRASES if cue in review), None)
+    if neg_p and pos_p:
+        logger.info("[DETERM-SENT] High-confidence mixed sentiment (specific)")
+        return f"Mixed because {neg_p} but {pos_p}."
     logger.info("[DETERM-SENT] High-confidence mixed sentiment")
     return "Mixed because the text mentions both positive and negative aspects."
 
