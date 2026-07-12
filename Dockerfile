@@ -47,6 +47,8 @@ COPY main.py classifier.py validators.py client.py deterministic_solvers.py ./
 # Set paths and python environment variables
 ENV PATH="/opt/venv/bin:$PATH"
 ENV PYTHONUNBUFFERED=1
+ENV ZERO_FIREWORKS=true
+ENV SKIP_FW_HEALTHCHECK=true
 
 # Set the standard entrypoint
 ENTRYPOINT ["python", "main.py"]

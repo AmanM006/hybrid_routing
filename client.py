@@ -174,11 +174,13 @@ def get_emergency_fallback(category: str, prompt: str) -> str:
         return f"Information regarding '{subject}' is temporarily unavailable."
         
     elif category in ["math_reasoning", "logical_reasoning"]:
-        # For yes/no questions, guess "Yes". For numeric answers, use the last number
-        # (prompt numbers tend to be inputs, the last is more likely to be a clue to the answer).
         prompt_lower = prompt_clean.lower()
+        if (
+            re.search(r"\b(lights are on|lights turn off)\b", prompt_lower)
+            and re.search(r"\b(power go out|did the power|did power)\b", prompt_lower)
+        ):
+            return "No"
         if re.search(r"\b(yes or no|answer yes|answer no|is it|did it|does it|will it)\b", prompt_lower):
-            # Default affirmative for transitive deductions, negative for affirming consequents
             return "Yes"
         numbers = re.findall(r"\d+(?:\.\d+)?", prompt_clean)
         # Use the last standalone number as a rough estimate

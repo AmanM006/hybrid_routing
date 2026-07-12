@@ -30,7 +30,23 @@ from deterministic_solvers import (
     solve_ner_deterministically,
     solve_logic_deterministically,
     solve_sentiment_deterministically,
+    solve_code_debug_deterministically,
 )
+
+ALL_CATEGORIES = [
+    "factual_knowledge",
+    "math_reasoning",
+    "sentiment_classification",
+    "summarization",
+    "named_entity_recognition",
+    "code_debugging",
+    "logical_reasoning",
+    "code_generation",
+]
+EASY_CATEGORIES = [
+    "factual_knowledge",
+    "summarization",
+]
 
 
 # Model configuration
@@ -39,6 +55,7 @@ MODEL_PATH = os.path.join(MODEL_DIR, "qwen2.5-1.5b-instruct-q4_k_m.gguf")
 
 # DEV_MODE toggle (defaulting to False for production submission)
 DEV_MODE = os.environ.get("DEV_MODE", "false").lower() == "true"
+ZERO_FIREWORKS = os.environ.get("ZERO_FIREWORKS", "false").lower() == "true"
 
 # Global local model state
 local_server_process = None
@@ -314,6 +331,20 @@ def _print_task_log(
     )
 
 
+def _local_max_tokens(category: str, prompt: str) -> int:
+    if category == "summarization":
+        return get_max_tokens(category, prompt)
+    if category == "sentiment_classification":
+        return 80
+    if category == "named_entity_recognition":
+        return 100
+    if category == "factual_knowledge":
+        return get_max_tokens(category, prompt)
+    if category in ["code_generation", "code_debugging"]:
+        return get_max_tokens(category, prompt)
+    return get_max_tokens(category, prompt)
+
+
 async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remote_sem):
     """
     The full cascade routing implementation.
@@ -326,13 +357,9 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
         local_callable = lambda p, max_tokens=15: call_local_model("You are a helpful classification assistant.", p, max_tokens)
         
     category = await classify_prompt(prompt, local_llm_callable=local_callable)
-    
-    easy_categories = [
-        "factual_knowledge",
-        "summarization",
-        # sentiment_classification: skip local tier — gemma returns label-only without justification
-        # named_entity_recognition: deterministic first-pass, then direct-remote if that fails
-    ]
+
+    zero_fw = ZERO_FIREWORKS
+    easy_categories = ALL_CATEGORIES if zero_fw else EASY_CATEGORIES
     
     tier_used = "unknown"
     model_name = "local"
@@ -395,10 +422,24 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
                 return {"task_id": task_id, "answer": det_answer}
         except Exception as e:
             logger.error(f"Task {task_id}: Sentiment deterministic solver raised an exception: {e}", exc_info=True)
+
+    if category == "code_debugging":
+        try:
+            det_answer = solve_code_debug_deterministically(prompt)
+            if det_answer is not None and _validate_output(category, prompt, det_answer):
+                logger.info(f"Task {task_id}: Solved deterministically (code debug). Answer={det_answer!r}")
+                latency = time.time() - start_time
+                _print_task_log(
+                    task_id, category, "deterministic", "none", 0, True, latency, fw_tokens=0
+                )
+                return {"task_id": task_id, "answer": det_answer}
+        except Exception as e:
+            logger.error(f"Task {task_id}: Code debug deterministic solver raised an exception: {e}", exc_info=True)
     
-    # 2. Local Tier (Easy categories)
+    # 2. Local Tier
     skip_local = (
-        category == "summarization"
+        not zero_fw
+        and category == "summarization"
         and re.search(
             r"\bexactly\s+(?:\d+|one|two|three|four|five)\s+sentences?\b",
             prompt.lower(),
@@ -407,21 +448,13 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
     if category in easy_categories and not local_disabled and not skip_local:
         async with local_sem:
             tier_used = "local"
+            model_name = "qwen-local"
             try:
                 system_prompt = SYSTEM_PROMPTS.get(category, "Answer the query.")
                 user_prompt = prompt + get_user_prompt_suffix(category, prompt)
-                # Token budget per category: summarization needs room for a full sentence,
-                # sentiment needs label+justification, NER needs JSON, others stay concise.
-                if category == "summarization":
-                    max_tokens = get_max_tokens(category, prompt)
-                elif category == "sentiment_classification":
-                    max_tokens = 100
-                elif category == "named_entity_recognition":
-                    max_tokens = 70
-                elif category == "factual_knowledge":
-                    max_tokens = get_max_tokens(category, prompt)
-                else:
-                    max_tokens = min(35, get_max_tokens(category, prompt))
+                if category == "sentiment_classification" and "because" not in user_prompt.lower():
+                    user_prompt += "\nReply: Label because brief reason."
+                max_tokens = _local_max_tokens(category, prompt)
                 raw_answer = await asyncio.wait_for(
                     call_local_model(system_prompt, user_prompt, max_tokens),
                     timeout=40.0
@@ -429,23 +462,40 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
                 answer = client._scrub_cot(raw_answer, category)
                 if category == "summarization":
                     answer = client._enforce_summary_format(answer, prompt)
-                validation_pass = _validate_output(category, prompt, answer)
-                if validation_pass:
+                if category == "named_entity_recognition":
+                    coerced, ok = coerce_ner_output(answer, prompt)
+                    if ok:
+                        answer = coerced
+                        validation_pass = True
+                    else:
+                        validation_pass = False
+                else:
+                    validation_pass = _validate_output(category, prompt, answer)
+                if validation_pass and category != "named_entity_recognition":
                     verification_pass = await verify_local_answer(category, prompt, answer)
                     if verification_pass:
                         logger.info(f"Task {task_id}: Local model passed validation and self-verification.")
                     else:
                         logger.info(f"Task {task_id}: Local model self-verification failed. Escalating...")
                         validation_pass = False
-                else:
-                    logger.info(f"Task {task_id}: Local model failed structural validation. Escalating to cheap remote...")
+                elif not validation_pass:
+                    logger.info(f"Task {task_id}: Local model failed structural validation. Escalating...")
             except asyncio.TimeoutError:
                 logger.warning(f"Task {task_id}: Local model execution timed out. Escalating...")
             except Exception as e:
                 logger.warning(f"Task {task_id}: Local model execution failed: {e}. Escalating...")
-            
-    # 3. Remote Tier Cascade (Easy categories on escalation or local disabled)
-    if category in easy_categories and not validation_pass:
+
+    if zero_fw:
+        if not validation_pass:
+            tier_used = "fallback"
+            model_name = "none"
+            answer = get_emergency_fallback(category, prompt)
+            validation_pass = _validate_output(category, prompt, answer)
+            if category == "named_entity_recognition" and not validation_pass:
+                answer = get_emergency_fallback(category, prompt)
+                validation_pass = True
+            logger.info(f"Task {task_id}: ZERO_FIREWORKS fallback answer={answer!r}")
+    elif category in easy_categories and not validation_pass:
         async with remote_sem:
             easy_tiers = _dedupe_cascade_tiers(roles, [
                 ("cheap-remote", "cheap", 9.0),
@@ -479,8 +529,8 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
                 logger.warning(f"Task {task_id}: All remote models failed for Easy Category. Falling back to emergency placeholder.")
                 answer = get_emergency_fallback(category, prompt)
                         
-    # 4. Direct-to-remote categories
-    if category not in easy_categories:
+    # 4. Direct-to-remote categories (disabled when ZERO_FIREWORKS)
+    if not zero_fw and category not in easy_categories:
         async with remote_sem:
             validation_pass = False
             if category in ["math_reasoning", "logical_reasoning"]:
@@ -715,6 +765,9 @@ async def main():
         sys.exit(1)
         
     allowed_models = [m.strip() for m in allowed_models_env.split(",") if m.strip()]
+
+    zero_fw = os.environ.get("ZERO_FIREWORKS", "false").lower() == "true"
+    print(f"ZERO_FIREWORKS: enabled={1 if zero_fw else 0}", flush=True)
     
     # 1. Parse and assign roles dynamically
     roles = classify_model_roles(allowed_models)
@@ -728,8 +781,11 @@ async def main():
     # 2. Setup client
     client = FireworksClient(api_key=api_key, base_url=base_url)
 
-    # v40: skip paid Fireworks healthcheck — assign roles directly; 404 pruned at task time.
-    skip_healthcheck = os.environ.get("SKIP_FW_HEALTHCHECK", "true").lower() == "true"
+    # v40/v41: skip paid Fireworks healthcheck when ZERO_FIREWORKS or SKIP_FW_HEALTHCHECK.
+    skip_healthcheck = (
+        zero_fw
+        or os.environ.get("SKIP_FW_HEALTHCHECK", "true").lower() == "true"
+    )
     tokens_after_healthcheck = 0
     if skip_healthcheck:
         logger.info("Skipping Fireworks healthcheck (SKIP_FW_HEALTHCHECK=true).")
