@@ -95,6 +95,13 @@ async def classify_prompt(prompt: str, local_llm_callable=None) -> str:
     if re.search(r"minimum.*(?:guarantee|certain|sure)|guarantee.*minimum|must draw|to guarantee|minimum number", prompt_lower):
         return "logical_reasoning"
 
+    # Probability puzzles are logic, not arithmetic — before math shortcut.
+    if (
+        re.search(r"\b(fair coin|coin flip|flipped a coin)\b", prompt_lower)
+        and re.search(r"\b(probability|chance|likelihood|fraction)\b", prompt_lower)
+    ):
+        return "logical_reasoning"
+
     # High-priority math — before propositional "if...then" (word problems often say "if someone bought...")
     has_math_pattern = (
         re.search(r"\b\d+\b.*?(?:percent|%|remain|remains|remaining|total|each|sells|items)\b", prompt_lower) or

@@ -12,7 +12,7 @@ os.environ["ALLOWED_MODELS"] = "accounts/fireworks/models/llama-v3p1-8b-instruct
 from classifier import classify_prompt
 from validators import validate_category_output, coerce_ner_output
 from client import FireworksClient, get_emergency_fallback, get_max_tokens
-from deterministic_solvers import solve_ner_deterministically, solve_sentiment_deterministically
+from deterministic_solvers import solve_ner_deterministically, solve_sentiment_deterministically, solve_logic_deterministically
 from main import classify_model_roles
 import main
 
@@ -237,6 +237,26 @@ class TestGeneralPurposeAgent(unittest.IsolatedAsyncioTestCase):
         result = solve_sentiment_deterministically(prompt)
         self.assertIsNotNone(result)
         self.assertTrue(validate_category_output("sentiment_classification", prompt, result))
+
+    def test_constraint_puzzle_regression_v38(self):
+        prompt = (
+            "Sam, Jo, and Lee each own one of: cat, dog, bird. "
+            "Sam does not own the bird. Jo owns the dog. Who owns the cat?"
+        )
+        self.assertEqual(solve_logic_deterministically(prompt), "Sam")
+        drink_prompt = (
+            "Mia, Noah, and Priya each drink one of coffee, tea, or juice. "
+            "Mia does not drink juice. Noah drinks tea. What does Priya drink?"
+        )
+        self.assertEqual(solve_logic_deterministically(drink_prompt), "Juice")
+
+    async def test_fair_coin_routes_to_logic(self):
+        prompt = (
+            "You flip a fair coin three times and get heads each time. "
+            "What is the probability the next flip is heads? Reply with a fraction."
+        )
+        self.assertEqual(await classify_prompt(prompt), "logical_reasoning")
+        self.assertEqual(solve_logic_deterministically(prompt), "1/2")
 
     def test_ner_partial_answers_fall_through_and_heading_repair(self):
         # Missing event/product/date candidates must not be accepted as a

@@ -637,7 +637,7 @@ def _solve_ner_deterministically(prompt: str):
     """
     # Only attempt on prompts explicitly requesting entity extraction
     if not re.search(
-        r"\b(extract|identify|find|list)\b.{0,40}\b(entities|names|people|places|organizations|dates)\b",
+        r"\b(extract|identify|find|list|pull out)\b.{0,60}\b(entities|names|people|places|organizations|organisations|dates|companies)\b",
         prompt, re.IGNORECASE
     ):
         return None
@@ -802,24 +802,25 @@ def _parse_constraint_puzzle(pl: str):
 
     entities_l = [e.lower() for e in entities]
 
-    # --- Extract values: multiple patterns ---
-    # Priority 1: "one of: X, Y, Z" or "one of the following: X, Y, Z"
-    # Priority 2: "different pets: X, Y, Z" (category noun MUST be followed by colon)
-    val_match = re.search(
-        r"(?:"
-        r"one of[:\s]+"
-        r"|(?:different\s+)?(?:pet|color|sport|subject|house|car|drink|flower|job|fruit|language|country)s?\s*:\s*"
-        r")"
-        r"([a-z]+(?:,\s*[a-z]+)*(?:,\s*)?(?:and|or)\s+[a-z]+)",
-        pl.lower()
+    # --- Extract values: "one of: X, Y, Z" or "different pets: X, Y, Z" ---
+    val_prefix = re.search(
+        r"(?:one of[:\s]+|(?:different\s+)?(?:pet|color|sport|subject|house|car|drink|flower|job|fruit|language|country)s?\s*:\s*)",
+        pl.lower(),
     )
-    if not val_match:
+    if not val_prefix:
         return None
 
-    val_str = val_match.group(1)
-    values = [v.strip().rstrip(".") for v in re.split(r",\s*|\s+(?:and|or)\s+", val_str) if v.strip()]
-    values = [re.sub(r"^(?:or|and)\s+", "", v) for v in values]
+    rest = pl.lower()[val_prefix.end():]
+    stop = re.search(r"[.?!]", rest)
+    val_str = (rest[: stop.start()] if stop else rest).strip().rstrip(".")
+    values = [
+        re.sub(r"^(?:or|and)\s+", "", v.strip())
+        for v in re.split(r",\s*|\s+(?:and|or)\s+", val_str)
+        if v.strip()
+    ]
     values = [v for v in values if len(v) > 1 and v not in ("the", "a", "an", "of", "or", "and")]
+    if not values:
+        return None
 
     if len(values) != len(entities):
         return None  # domain size mismatch — unsafe
