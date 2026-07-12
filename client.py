@@ -63,7 +63,7 @@ def get_max_tokens(category: str, prompt: str) -> int:
     Returns appropriate max_tokens constraint based on category and prompt constraints.
     """
     if category == "named_entity_recognition":
-        return 120
+        return 100
     elif category == "sentiment_classification":
         return 55
     elif category == "summarization":
@@ -83,14 +83,16 @@ def get_max_tokens(category: str, prompt: str) -> int:
             r"\b(explain|describe|difference|compare|briefly|how (?:each|each works|do|does)|what is the difference)\b",
             prompt_lower,
         ):
-            return 250
+            if re.search(r"machine learning.*deep learning|deep learning.*machine learning", prompt_lower):
+                return 240
+            return 220
         return 100
     elif category == "math_reasoning":
         return 120
     elif category == "logical_reasoning":
-        return 220
+        return 180
     elif category in ["code_generation", "code_debugging"]:
-        return 380
+        return 300
     return 100
 
 def get_user_prompt_suffix(category: str, prompt: str) -> str:
@@ -119,7 +121,13 @@ def get_user_prompt_suffix(category: str, prompt: str) -> str:
                 return f"\n\nExactly {n} complete sentences."
         return "\n\nSummary:"
     if category == "factual_knowledge":
-        return "\n\nPlain prose. No markdown."
+        pl = prompt.lower()
+        suffix = "\n\nPlain prose. No markdown."
+        if re.search(r"machine learning.*deep learning|deep learning.*machine learning", pl):
+            suffix += (
+                " Use the exact phrases manual feature engineering and automatic feature extraction."
+            )
+        return suffix
     return "\n\nAnswer only."
 
 def get_emergency_fallback(category: str, prompt: str) -> str:

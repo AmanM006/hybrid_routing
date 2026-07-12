@@ -53,7 +53,10 @@ COPY main.py classifier.py validators.py client.py deterministic_solvers.py ./
 
 # Set paths and python environment variables
 ENV PATH="/opt/venv/bin:$PATH"
-ENV PYTHONUNBUFFERED=1
+# v49 top-1: skip healthcheck (-184 tokens), local concurrency=1
+ENV SKIP_HEALTHCHECK=true
+ENV MAX_LOCAL_CONCURRENCY=1
+ENV LLAMA_THREADS=2
 
 # Set the standard entrypoint
 ENTRYPOINT ["python", "main.py"]

@@ -30,6 +30,8 @@ from deterministic_solvers import (
     solve_ner_deterministically,
     solve_logic_deterministically,
     solve_sentiment_deterministically,
+    solve_factual_deterministically,
+    solve_code_debug_deterministically,
 )
 
 
@@ -46,6 +48,85 @@ local_disabled = True
 
 # System Prompt Caching
 from client import SYSTEM_PROMPTS
+
+def _is_trivia_factual(prompt: str) -> bool:
+    """True for short closed-book factual prompts safe to try locally."""
+    pl = prompt.lower()
+    if re.search(
+        r"\b(explain|describe|difference|compare|how each|how do|how does|why |briefly explain)\b",
+        pl,
+    ):
+        return False
+    return bool(
+        re.search(
+            r"\b(symbol|stand for|red planet|who wrote|trivia|which planet|what does .+ stand for)\b",
+            pl,
+        )
+    )
+
+
+def _is_simple_ner_prompt(prompt: str) -> bool:
+    """Heuristic: short NER prompts with few capitalized spans."""
+    caps = re.findall(r"\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b", prompt)
+    return 1 <= len(caps) <= 6
+
+
+def _local_eligible(category: str, prompt: str) -> bool:
+    if category == "summarization":
+        return True
+    if category == "sentiment_classification":
+        return True
+    if category == "factual_knowledge":
+        return _is_trivia_factual(prompt)
+    if category == "named_entity_recognition":
+        return _is_simple_ner_prompt(prompt)
+    return False
+
+
+async def _try_local_tier(
+    task_id: str,
+    category: str,
+    prompt: str,
+    client: FireworksClient,
+    local_sem: asyncio.Semaphore,
+    *,
+    verify: bool = False,
+) -> tuple[bool, str]:
+    """Run local inference for eligible categories. Returns (validation_pass, answer)."""
+    global local_disabled
+    if local_disabled or not _local_eligible(category, prompt):
+        return False, ""
+    async with local_sem:
+        try:
+            system_prompt = SYSTEM_PROMPTS.get(category, "Answer the query.")
+            user_prompt = prompt + get_user_prompt_suffix(category, prompt)
+            max_tokens = get_max_tokens(category, prompt)
+            raw_answer = await asyncio.wait_for(
+                call_local_model(system_prompt, user_prompt, max_tokens),
+                timeout=45.0,
+            )
+            answer = client._scrub_cot(raw_answer, category)
+            if category == "summarization":
+                answer = client._enforce_summary_format(answer, prompt)
+            if category == "named_entity_recognition":
+                coerced, ok = coerce_ner_output(answer, prompt)
+                if coerced:
+                    answer = coerced
+                    if ok:
+                        return True, answer
+            validation_pass = _validate_output(category, prompt, answer)
+            if validation_pass and verify:
+                validation_pass = await verify_local_answer(category, prompt, answer)
+            if validation_pass:
+                logger.info(f"Task {task_id}: Local model passed validation.")
+                return True, answer
+            logger.info(f"Task {task_id}: Local model failed validation. Escalating...")
+        except asyncio.TimeoutError:
+            logger.warning(f"Task {task_id}: Local model execution timed out. Escalating...")
+        except Exception as e:
+            logger.warning(f"Task {task_id}: Local model execution failed: {e}. Escalating...")
+    return False, ""
+
 
 def format_chatml(system: str, user: str) -> str:
     return f"<|im_start|>system\n{system}<|im_end|>\n<|im_start|>user\n{user}<|im_end|>\n<|im_start|>assistant\n"
@@ -396,74 +477,87 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
                 return {"task_id": task_id, "answer": det_answer}
         except Exception as e:
             logger.error(f"Task {task_id}: Sentiment deterministic solver raised an exception: {e}", exc_info=True)
-    
-    # 2. Local Tier — summarization only (bench-proven; factual stays remote for accuracy)
-    if category == "summarization" and not local_disabled:
-        async with local_sem:
-            tier_used = "local"
-            try:
-                system_prompt = SYSTEM_PROMPTS.get(category, "Answer the query.")
-                user_prompt = prompt + get_user_prompt_suffix(category, prompt)
-                max_tokens = get_max_tokens(category, prompt)
-                raw_answer = await asyncio.wait_for(
-                    call_local_model(system_prompt, user_prompt, max_tokens),
-                    timeout=45.0
+
+    if category == "factual_knowledge":
+        try:
+            det_answer = solve_factual_deterministically(prompt)
+            if det_answer is not None:
+                logger.info(f"Task {task_id}: Solved deterministically (factual). Answer={det_answer!r}")
+                latency = time.time() - start_time
+                _print_task_log(
+                    task_id, category, "deterministic", "none", 0, True, latency, fw_tokens=0
                 )
-                answer = client._scrub_cot(raw_answer, category)
-                if category == "summarization":
-                    answer = client._enforce_summary_format(answer, prompt)
-                validation_pass = _validate_output(category, prompt, answer)
-                if validation_pass:
-                    verification_pass = await verify_local_answer(category, prompt, answer)
-                    if verification_pass:
-                        logger.info(f"Task {task_id}: Local model passed validation and self-verification.")
-                    else:
-                        logger.info(f"Task {task_id}: Local model self-verification failed. Escalating...")
-                        validation_pass = False
-                else:
-                    logger.info(f"Task {task_id}: Local model failed structural validation. Escalating to cheap remote...")
-            except asyncio.TimeoutError:
-                logger.warning(f"Task {task_id}: Local model execution timed out. Escalating...")
-            except Exception as e:
-                logger.warning(f"Task {task_id}: Local model execution failed: {e}. Escalating...")
+                return {"task_id": task_id, "answer": det_answer}
+        except Exception as e:
+            logger.error(f"Task {task_id}: Factual deterministic solver raised an exception: {e}", exc_info=True)
+
+    if category == "code_debugging":
+        try:
+            det_answer = solve_code_debug_deterministically(prompt)
+            if det_answer is not None and _validate_output(category, prompt, det_answer):
+                logger.info(f"Task {task_id}: Solved deterministically (code debug). Answer={det_answer!r}")
+                latency = time.time() - start_time
+                _print_task_log(
+                    task_id, category, "deterministic", "none", 0, True, latency, fw_tokens=0
+                )
+                return {"task_id": task_id, "answer": det_answer}
+        except Exception as e:
+            logger.error(f"Task {task_id}: Code debug deterministic solver raised an exception: {e}", exc_info=True)
+
+    # 2. Local Tier — summarization, sentiment, trivia factual, simple NER
+    if not validation_pass and not local_disabled:
+        local_ok, local_answer = await _try_local_tier(
+            task_id, category, prompt, client, local_sem, verify=False
+        )
+        if local_ok:
+            tier_used = "local"
+            model_name = "local"
+            answer = local_answer
+            validation_pass = True
             
     # 3. Remote Tier Cascade (Easy categories on escalation or local disabled)
     if category in easy_categories and not validation_pass:
         async with remote_sem:
-            easy_tiers = _dedupe_cascade_tiers(roles, [
-                ("cheap-remote", "cheap", 9.0),
-                ("mid-remote", "mid", 9.0),
-                ("reasoning-fallback", "reasoning", 12.0),
-            ])
-            for tier_name, model, timeout in easy_tiers:
-                if validation_pass:
-                    break
-                tier_used = tier_name
-                model_name = model
+            cheap_model = roles.get("cheap")
+            if cheap_model:
+                tier_used = "cheap-remote"
+                model_name = cheap_model
                 try:
-                    if tier_name == "reasoning-fallback":
-                        logger.info(f"Task {task_id}: Easy category falling back to reasoning model: {model_name}")
                     answer = await client.call_api(
-                        model=model,
+                        model=cheap_model,
                         category=category,
                         prompt=prompt,
-                        timeout=timeout,
+                        timeout=9.0,
                     )
                     validation_pass = _validate_output(category, prompt, answer)
                     if validation_pass:
-                        if tier_name == "cheap-remote":
-                            logger.info(f"Task {task_id}: Cheap remote model passed validation.")
-                        elif tier_name == "mid-remote":
-                            logger.info(f"Task {task_id}: Mid remote model passed validation.")
-                        else:
-                            logger.info(f"Task {task_id}: Easy category reasoning fallback passed validation.")
+                        logger.info(f"Task {task_id}: Cheap remote model passed validation.")
                 except Exception as e:
-                    if tier_name == "cheap-remote":
-                        logger.warning(f"Task {task_id}: Cheap remote model failed: {e}. Escalating...")
-                    elif tier_name == "mid-remote":
-                        logger.warning(f"Task {task_id}: Mid remote model failed: {e}. Escalating...")
-                    else:
-                        logger.warning(f"Task {task_id}: Easy category reasoning fallback failed: {e}. Escalating...")
+                    logger.warning(f"Task {task_id}: Cheap remote model failed: {e}. Escalating...")
+                    for tier_name, role_key, timeout in [
+                        ("mid-remote", "mid", 9.0),
+                        ("reasoning-fallback", "reasoning", 12.0),
+                    ]:
+                        if validation_pass:
+                            break
+                        fallback_model = roles.get(role_key)
+                        if not fallback_model or fallback_model == cheap_model:
+                            continue
+                        tier_used = tier_name
+                        model_name = fallback_model
+                        try:
+                            answer = await client.call_api(
+                                model=fallback_model,
+                                category=category,
+                                prompt=prompt,
+                                timeout=timeout,
+                            )
+                            validation_pass = _validate_output(category, prompt, answer)
+                            if validation_pass:
+                                logger.info(f"Task {task_id}: {tier_name} passed validation.")
+                                break
+                        except Exception as e2:
+                            logger.warning(f"Task {task_id}: {tier_name} failed: {e2}")
 
             if not validation_pass:
                 logger.warning(f"Task {task_id}: All remote models failed for Easy Category. Falling back to emergency placeholder.")
@@ -514,12 +608,13 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
                     answer = get_emergency_fallback(category, prompt)
                             
             elif category in ["code_debugging", "code_generation"]:
-                code_tiers = _dedupe_cascade_tiers(roles, [
-                    ("direct-remote", "code", 14.0),
-                    ("mid-fallback", "mid", 12.0),
-                    ("cheap-fallback", "cheap", 10.0),
-                    ("reasoning-fallback", "reasoning", 12.0),
-                ])
+                code_model = roles.get("code")
+                reasoning_model = roles.get("reasoning")
+                code_tiers = []
+                if code_model:
+                    code_tiers.append(("direct-remote", code_model, 14.0))
+                if reasoning_model and reasoning_model != code_model:
+                    code_tiers.append(("reasoning-fallback", reasoning_model, 12.0))
                 for tier_name, model, timeout in code_tiers:
                     if validation_pass:
                         break
@@ -527,7 +622,7 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
                     model_name = model
                     try:
                         if tier_name != "direct-remote":
-                            logger.info(f"Task {task_id}: Code falling back to {tier_name.replace('-fallback', '')} model: {model_name}")
+                            logger.info(f"Task {task_id}: Code falling back to reasoning model: {model_name}")
                         answer = await client.call_api(
                             model=model,
                             category=category,
@@ -536,23 +631,9 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
                         )
                         validation_pass = _validate_output(category, prompt, answer)
                         if validation_pass:
-                            if tier_name == "direct-remote":
-                                logger.info(f"Task {task_id}: Code model passed validation.")
-                            elif tier_name == "mid-fallback":
-                                logger.info(f"Task {task_id}: Code mid fallback model passed validation.")
-                            elif tier_name == "cheap-fallback":
-                                logger.info(f"Task {task_id}: Code cheap fallback model passed validation.")
-                            else:
-                                logger.info(f"Task {task_id}: Code reasoning fallback model passed validation.")
+                            logger.info(f"Task {task_id}: Code model passed validation.")
                     except Exception as e:
-                        if tier_name == "direct-remote":
-                            logger.warning(f"Task {task_id}: Code model failed: {e}. Escalating...")
-                        elif tier_name == "mid-fallback":
-                            logger.warning(f"Task {task_id}: Code mid fallback failed: {e}. Escalating...")
-                        elif tier_name == "cheap-fallback":
-                            logger.warning(f"Task {task_id}: Code cheap fallback failed: {e}. Escalating...")
-                        else:
-                            logger.warning(f"Task {task_id}: Code reasoning fallback failed: {e}")
+                        logger.warning(f"Task {task_id}: Code {tier_name} failed: {e}")
 
                 if not validation_pass:
                     logger.warning(f"Task {task_id}: All models failed for Code. Falling back to emergency placeholder.")
@@ -711,6 +792,12 @@ async def main():
     
     # 1. Parse and assign roles dynamically
     roles = classify_model_roles(allowed_models)
+    skip_healthcheck = os.environ.get("SKIP_HEALTHCHECK", "false").lower() == "true"
+    if skip_healthcheck:
+        # Without ping pruning, undeployed gemma models 404 and waste tokens on retries.
+        live_allowed = [m for m in allowed_models if "gemma" not in m.lower()]
+        if live_allowed:
+            roles = classify_model_roles(live_allowed)
     
     # Log configuration table
     print("=== CONFIGURATION TABLE ===")
@@ -722,65 +809,64 @@ async def main():
     client = FireworksClient(api_key=api_key, base_url=base_url)
     
     # Run startup model connectivity check — prune dead models from the role assignment.
-    # Only ping the models we actually route to (reasoning + code). Skipping dead gemma
-    # variants saves ~150 tokens vs pinging every ALLOWED_MODELS entry, and yields the
-    # same live role table v38 ends up with after 404-pruning.
-    ping_targets: list[str] = []
-    for role_key in ("reasoning", "code"):
-        model_name = roles.get(role_key)
-        if model_name and model_name not in ping_targets:
-            ping_targets.append(model_name)
-
-    logger.info(f"Starting Fireworks healthcheck for task models: {ping_targets}")
-    live_models = []
-    dead_models = []
-    for model_name in ping_targets:
-        try:
-            logger.info(f"Healthcheck: sending test ping to {model_name}...")
-            await client.call_api(
-                model=model_name,
-                category="factual_knowledge",
-                prompt="hello",
-                timeout=2.0,
-                max_tokens_override=5,
-            )
-            logger.info(f"Healthcheck for '{model_name}': SUCCESS (200)")
-            live_models.append(model_name)
-        except Exception as e:
-            err_str = str(e)
-            if "404" in err_str or "NOT_FOUND" in err_str or "not found" in err_str.lower():
-                # 404 is deterministic — model doesn't exist. Mark dead immediately, no retry.
-                logger.warning(f"Healthcheck for '{model_name}': DEAD (404 — removing from cascade)")
-                dead_models.append(model_name)
-            elif "429" in err_str or "RATE_LIMIT" in err_str:
-                # Rate limit during healthcheck — model exists, just busy. Keep it.
-                logger.warning(f"Healthcheck for '{model_name}': SOFT_FAIL 429 (keeping in cascade)")
-                live_models.append(model_name)
-            else:
-                # Other failure (timeout, 5xx) — keep the model, may recover
-                logger.warning(f"Healthcheck for '{model_name}': SOFT_FAIL (keeping in cascade) — {e}")
-                live_models.append(model_name)
-
-    tokens_after_healthcheck = client.total_fireworks_tokens()
-    print(
-        f"FIREWORKS_HEALTHCHECK: calls={client.total_calls} | "
-        f"prompt={client.total_prompt_tokens} | completion={client.total_completion_tokens} | "
-        f"total={tokens_after_healthcheck}",
-        flush=True,
-    )
-    
-    if dead_models:
-        logger.warning(f"Pruned {len(dead_models)} dead models from cascade: {dead_models}")
-    
-    # Re-classify roles using only live models
-    if live_models:
-        roles = classify_model_roles(live_models)
-        print("=== UPDATED ROLE TABLE (live models only) ===")
-        for role, model in roles.items():
-            print(f"Role '{role}': {model}")
-        print("=============================================")
+    skip_healthcheck = os.environ.get("SKIP_HEALTHCHECK", "false").lower() == "true"
+    tokens_after_healthcheck = 0
+    if skip_healthcheck:
+        logger.info("SKIP_HEALTHCHECK=true — skipping Fireworks healthcheck pings.")
+        print("FIREWORKS_HEALTHCHECK: calls=0 | prompt=0 | completion=0 | total=0", flush=True)
     else:
-        logger.error("All models failed healthcheck — cannot process tasks.")
+        ping_targets: list[str] = []
+        for role_key in ("reasoning", "code"):
+            model_name = roles.get(role_key)
+            if model_name and model_name not in ping_targets:
+                ping_targets.append(model_name)
+
+        logger.info(f"Starting Fireworks healthcheck for task models: {ping_targets}")
+        live_models = []
+        dead_models = []
+        for model_name in ping_targets:
+            try:
+                logger.info(f"Healthcheck: sending test ping to {model_name}...")
+                await client.call_api(
+                    model=model_name,
+                    category="factual_knowledge",
+                    prompt="hello",
+                    timeout=2.0,
+                    max_tokens_override=5,
+                )
+                logger.info(f"Healthcheck for '{model_name}': SUCCESS (200)")
+                live_models.append(model_name)
+            except Exception as e:
+                err_str = str(e)
+                if "404" in err_str or "NOT_FOUND" in err_str or "not found" in err_str.lower():
+                    logger.warning(f"Healthcheck for '{model_name}': DEAD (404 — removing from cascade)")
+                    dead_models.append(model_name)
+                elif "429" in err_str or "RATE_LIMIT" in err_str:
+                    logger.warning(f"Healthcheck for '{model_name}': SOFT_FAIL 429 (keeping in cascade)")
+                    live_models.append(model_name)
+                else:
+                    logger.warning(f"Healthcheck for '{model_name}': SOFT_FAIL (keeping in cascade) — {e}")
+                    live_models.append(model_name)
+
+        tokens_after_healthcheck = client.total_fireworks_tokens()
+        print(
+            f"FIREWORKS_HEALTHCHECK: calls={client.total_calls} | "
+            f"prompt={client.total_prompt_tokens} | completion={client.total_completion_tokens} | "
+            f"total={tokens_after_healthcheck}",
+            flush=True,
+        )
+
+        if dead_models:
+            logger.warning(f"Pruned {len(dead_models)} dead models from cascade: {dead_models}")
+
+        if live_models:
+            roles = classify_model_roles(live_models)
+            print("=== UPDATED ROLE TABLE (live models only) ===")
+            for role, model in roles.items():
+                print(f"Role '{role}': {model}")
+            print("=============================================")
+        else:
+            logger.error("All models failed healthcheck — cannot process tasks.")
 
             
     # Set up paths
