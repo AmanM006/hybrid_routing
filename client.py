@@ -19,42 +19,33 @@ def _parse_count_token(token: str) -> int | None:
         return int(token)
     return _COUNT_WORDS.get(token)
 
-# Category instructions — kept lean for token efficiency
+# Category instructions — kept lean for token efficiency (v40 trim)
 SYSTEM_PROMPTS = {
     "named_entity_recognition": (
-        "Extract entities from the text. Output raw JSON only: "
-        '{"entities": [{"text": "...", "type": "PERSON|ORG|LOCATION|DATE|..."}]}. '
-        "No markdown, no preamble."
+        'JSON only: {"entities":[{"text":"...","type":"PERSON|ORG|LOCATION|DATE|..."}]}. '
+        "No markdown."
     ),
     "sentiment_classification": (
-        "Classify sentiment (positive/negative/neutral/mixed). "
-        "Reply in exactly this form: '<Label> because <brief reason>.' "
-        "Use the literal word 'because'. No preamble."
+        "Format: '<Label> because <reason>.' Label = positive/negative/neutral/mixed. "
+        "Use the word because."
     ),
     "summarization": (
-        "Summarize the text. Respect any length or format limits in the prompt. "
-        "When the passage presents both benefits and concerns, include both sides. "
-        "Output the summary only."
+        "Summarize per prompt limits. Include both sides when text has pros and cons."
     ),
     "factual_knowledge": (
-        "Answer the question directly in plain prose — no markdown headers or bullet lists. "
-        "Address every part of the question completely. No preamble."
+        "Direct plain-prose answer. Cover every part of the question."
     ),
     "math_reasoning": (
-        "Solve the math problem. Show minimal steps, end with 'Answer: <value>' on its own line."
+        "Minimal steps. End with 'Answer: <value>' on its own line."
     ),
     "logical_reasoning": (
-        "Solve carefully using only the stated facts. Avoid affirming the consequent, "
-        "converse errors, and assumptions not guaranteed by the premises. "
-        "Show minimal steps, then end with 'Answer: <value>' on its own line."
+        "Use only stated facts. End with 'Answer: <value>' on its own line."
     ),
     "code_generation": (
-        "Write complete functional code in a single markdown code block. No explanation."
+        "One complete markdown code block. No explanation."
     ),
     "code_debugging": (
-        "Fix every stated bug and edge case. Mentally test the corrected code against "
-        "the request, including empty inputs and boundary cases. Output one corrected "
-        "markdown code block only."
+        "One corrected markdown code block. No explanation."
     ),
 }
 
@@ -63,52 +54,46 @@ def get_max_tokens(category: str, prompt: str) -> int:
     Returns appropriate max_tokens constraint based on category and prompt constraints.
     """
     if category == "named_entity_recognition":
-        return 120
+        return 100
     elif category == "sentiment_classification":
-        return 55
+        return 35
     elif category == "summarization":
         prompt_lower = prompt.lower()
         if re.search(r"bullet\s*points?", prompt_lower):
-            return 120
+            return 90
         if re.search(r"\bexactly\s+(?:\d+|one|two|three|four|five)\s+sentences?\b", prompt_lower):
-            return 160
+            return 120
         word_limit_match = re.search(r"(\d+)\s*words?", prompt_lower)
         if word_limit_match:
             limit = int(word_limit_match.group(1))
-            return max(40, limit * 2 + 8)
-        return 120
+            return max(35, limit * 2 + 6)
+        return 90
     elif category == "factual_knowledge":
         prompt_lower = prompt.lower()
         if re.search(
             r"\b(explain|describe|difference|compare|briefly|how (?:each|each works|do|does)|what is the difference)\b",
             prompt_lower,
         ):
-            return 300
-        return 100
+            return 180
+        return 70
     elif category == "math_reasoning":
-        return 120
+        return 70
     elif category == "logical_reasoning":
-        return 220
+        return 90
     elif category in ["code_generation", "code_debugging"]:
-        return 380
-    return 100
+        return 300
+    return 80
 
 def get_user_prompt_suffix(category: str, prompt: str) -> str:
-    """Category-specific user suffix shared by remote API and local tier."""
+    """Minimal suffix — system prompt already carries format rules (v40 token trim)."""
     if category == "sentiment_classification":
-        return (
-            "\n\nRequired format: <Positive|Negative|Neutral|Mixed> because <brief reason>. "
-            "You MUST use the word because."
-        )
+        return ""
     if category == "math_reasoning":
-        return "\n\nAnswer:"
+        return "\nAnswer:"
     if category == "logical_reasoning":
-        return "\n\nAnswer:"
+        return "\nAnswer:"
     if category == "named_entity_recognition":
-        return (
-            "\n\nReturn every named person, organization, location, event, product, and date. "
-            "Output only {\"entities\":[{\"text\":\"...\",\"type\":\"...\"}]} JSON."
-        )
+        return ""
     if category == "summarization":
         exact_sent = re.search(
             r"\bexactly\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+sentences?\b",
@@ -118,19 +103,15 @@ def get_user_prompt_suffix(category: str, prompt: str) -> str:
             n = _parse_count_token(exact_sent.group(1))
             if n == 2:
                 return (
-                    "\n\nWrite exactly 2 complete sentences. "
-                    "Sentence 1: key opportunities, benefits, or applications from the passage "
-                    "(e.g. image analysis, prediction, pattern recognition). "
-                    "Sentence 2: key challenges, risks, or concerns from the passage "
-                    "(e.g. interpretability, privacy, liability, bias, regulatory lag). "
-                    "Use specific details from the text; cover both sides."
+                    "\nExactly 2 sentences: (1) benefits/applications from the text, "
+                    "(2) challenges/risks from the text."
                 )
             if n is not None:
-                return f"\n\nWrite exactly {n} complete sentences. No more, no fewer."
-        return "\n\nSummary:"
+                return f"\nExactly {n} sentences."
+        return ""
     if category == "factual_knowledge":
-        return "\n\nAnswer completely in plain prose. No markdown."
-    return "\n\nAnswer only."
+        return ""
+    return ""
 
 def get_emergency_fallback(category: str, prompt: str) -> str:
     """
@@ -380,7 +361,7 @@ class FireworksClient:
             {"role": "user", "content": prompt + user_suffix}
         ]
         
-        attempts = 5
+        attempts = 3
         import random
         for attempt in range(attempts):
             try:
@@ -398,28 +379,12 @@ class FireworksClient:
                     kwargs["extra_body"] = {"reasoning_effort": "none"}
                     
                 try:
-                    payload_msg = (
-                        f"FIREWORKS_PAYLOAD: model={kwargs.get('model')} | "
-                        f"extra_body={kwargs.get('extra_body')} | messages={kwargs.get('messages')}"
-                    )
-                    try:
-                        print(payload_msg, flush=True)
-                    except UnicodeEncodeError:
-                        print(payload_msg.encode("ascii", errors="replace").decode("ascii"), flush=True)
                     response = await self.client.chat.completions.create(**kwargs)
                 except Exception as e:
                     # If reasoning_effort is not supported by the endpoint/SDK version, fall back
                     if "extra_body" in kwargs and any(err in str(e).lower() for err in ["reasoning_effort", "invalid", "unexpected", "400"]):
                         logger.warning(f"API call with reasoning_effort failed: {e}. Retrying without reasoning_effort parameter...")
                         del kwargs["extra_body"]
-                        retry_msg = (
-                            f"FIREWORKS_PAYLOAD (RETRY): model={kwargs.get('model')} | "
-                            f"extra_body={kwargs.get('extra_body')} | messages={kwargs.get('messages')}"
-                        )
-                        try:
-                            print(retry_msg, flush=True)
-                        except UnicodeEncodeError:
-                            print(retry_msg.encode("ascii", errors="replace").decode("ascii"), flush=True)
                         response = await self.client.chat.completions.create(**kwargs)
                     else:
                         raise e

@@ -450,7 +450,6 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
             easy_tiers = _dedupe_cascade_tiers(roles, [
                 ("cheap-remote", "cheap", 9.0),
                 ("mid-remote", "mid", 9.0),
-                ("reasoning-fallback", "reasoning", 12.0),
             ])
             for tier_name, model, timeout in easy_tiers:
                 if validation_pass:
@@ -458,8 +457,6 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
                 tier_used = tier_name
                 model_name = model
                 try:
-                    if tier_name == "reasoning-fallback":
-                        logger.info(f"Task {task_id}: Easy category falling back to reasoning model: {model_name}")
                     answer = await client.call_api(
                         model=model,
                         category=category,
@@ -470,17 +467,13 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
                     if validation_pass:
                         if tier_name == "cheap-remote":
                             logger.info(f"Task {task_id}: Cheap remote model passed validation.")
-                        elif tier_name == "mid-remote":
-                            logger.info(f"Task {task_id}: Mid remote model passed validation.")
                         else:
-                            logger.info(f"Task {task_id}: Easy category reasoning fallback passed validation.")
+                            logger.info(f"Task {task_id}: Mid remote model passed validation.")
                 except Exception as e:
                     if tier_name == "cheap-remote":
                         logger.warning(f"Task {task_id}: Cheap remote model failed: {e}. Escalating...")
-                    elif tier_name == "mid-remote":
-                        logger.warning(f"Task {task_id}: Mid remote model failed: {e}. Escalating...")
                     else:
-                        logger.warning(f"Task {task_id}: Easy category reasoning fallback failed: {e}. Escalating...")
+                        logger.warning(f"Task {task_id}: Mid remote model failed: {e}. Escalating...")
 
             if not validation_pass:
                 logger.warning(f"Task {task_id}: All remote models failed for Easy Category. Falling back to emergency placeholder.")
@@ -535,7 +528,6 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
                     ("direct-remote", "code", 14.0),
                     ("mid-fallback", "mid", 12.0),
                     ("cheap-fallback", "cheap", 10.0),
-                    ("reasoning-fallback", "reasoning", 12.0),
                 ])
                 for tier_name, model, timeout in code_tiers:
                     if validation_pass:
@@ -576,11 +568,9 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
                     answer = get_emergency_fallback(category, prompt)
 
             elif category == "sentiment_classification":
-                # Accuracy-first: mid → reasoning → cheap (no code). v23 cheap-only regressed.
                 sentiment_tiers = _dedupe_cascade_tiers(roles, [
                     ("mid-fallback", "mid", 10.0),
                     ("reasoning-fallback", "reasoning", 12.0),
-                    ("cheap-fallback", "cheap", 9.0),
                 ])
                 for tier_name, model, timeout in sentiment_tiers:
                     if validation_pass:
@@ -737,49 +727,54 @@ async def main():
     
     # 2. Setup client
     client = FireworksClient(api_key=api_key, base_url=base_url)
-    
-    # Run startup model connectivity check — prune dead models from the role assignment
-    logger.info("Starting Fireworks connectivity healthcheck for all allowed models...")
-    live_models = []
-    dead_models = []
-    for model_name in allowed_models:
-        try:
-            logger.info(f"Healthcheck: sending test ping to {model_name}...")
-            await client.call_api(
-                model=model_name,
-                category="factual_knowledge",
-                prompt="hello",
-                timeout=2.0
-            )
-            logger.info(f"Healthcheck for '{model_name}': SUCCESS (200)")
-            live_models.append(model_name)
-        except Exception as e:
-            err_str = str(e)
-            if "404" in err_str or "NOT_FOUND" in err_str or "not found" in err_str.lower():
-                # 404 is deterministic — model doesn't exist. Mark dead immediately, no retry.
-                logger.warning(f"Healthcheck for '{model_name}': DEAD (404 — removing from cascade)")
-                dead_models.append(model_name)
-            elif "429" in err_str or "RATE_LIMIT" in err_str:
-                # Rate limit during healthcheck — model exists, just busy. Keep it.
-                logger.warning(f"Healthcheck for '{model_name}': SOFT_FAIL 429 (keeping in cascade)")
-                live_models.append(model_name)
-            else:
-                # Other failure (timeout, 5xx) — keep the model, may recover
-                logger.warning(f"Healthcheck for '{model_name}': SOFT_FAIL (keeping in cascade) — {e}")
-                live_models.append(model_name)
 
-    tokens_after_healthcheck = client.total_fireworks_tokens()
-    print(
-        f"FIREWORKS_HEALTHCHECK: calls={client.total_calls} | "
-        f"prompt={client.total_prompt_tokens} | completion={client.total_completion_tokens} | "
-        f"total={tokens_after_healthcheck}",
-        flush=True,
-    )
-    
-    if dead_models:
-        logger.warning(f"Pruned {len(dead_models)} dead models from cascade: {dead_models}")
-    
-    # Re-classify roles using only live models
+    # v40: skip paid Fireworks healthcheck — assign roles directly; 404 pruned at task time.
+    skip_healthcheck = os.environ.get("SKIP_FW_HEALTHCHECK", "true").lower() == "true"
+    tokens_after_healthcheck = 0
+    if skip_healthcheck:
+        logger.info("Skipping Fireworks healthcheck (SKIP_FW_HEALTHCHECK=true).")
+        live_models = allowed_models.copy()
+        print(
+            "FIREWORKS_HEALTHCHECK: skipped=1 | prompt=0 | completion=0 | total=0",
+            flush=True,
+        )
+    else:
+        logger.info("Starting Fireworks connectivity healthcheck for all allowed models...")
+        live_models = []
+        dead_models = []
+        for model_name in allowed_models:
+            try:
+                logger.info(f"Healthcheck: sending test ping to {model_name}...")
+                await client.call_api(
+                    model=model_name,
+                    category="factual_knowledge",
+                    prompt="hello",
+                    timeout=2.0
+                )
+                logger.info(f"Healthcheck for '{model_name}': SUCCESS (200)")
+                live_models.append(model_name)
+            except Exception as e:
+                err_str = str(e)
+                if "404" in err_str or "NOT_FOUND" in err_str or "not found" in err_str.lower():
+                    logger.warning(f"Healthcheck for '{model_name}': DEAD (404 — removing from cascade)")
+                    dead_models.append(model_name)
+                elif "429" in err_str or "RATE_LIMIT" in err_str:
+                    logger.warning(f"Healthcheck for '{model_name}': SOFT_FAIL 429 (keeping in cascade)")
+                    live_models.append(model_name)
+                else:
+                    logger.warning(f"Healthcheck for '{model_name}': SOFT_FAIL (keeping in cascade) — {e}")
+                    live_models.append(model_name)
+
+        tokens_after_healthcheck = client.total_fireworks_tokens()
+        print(
+            f"FIREWORKS_HEALTHCHECK: calls={client.total_calls} | "
+            f"prompt={client.total_prompt_tokens} | completion={client.total_completion_tokens} | "
+            f"total={tokens_after_healthcheck}",
+            flush=True,
+        )
+        if dead_models:
+            logger.warning(f"Pruned {len(dead_models)} dead models from cascade: {dead_models}")
+
     if live_models:
         roles = classify_model_roles(live_models)
         print("=== UPDATED ROLE TABLE (live models only) ===")
@@ -787,7 +782,7 @@ async def main():
             print(f"Role '{role}': {model}")
         print("=============================================")
     else:
-        logger.error("All models failed healthcheck — cannot process tasks.")
+        logger.error("No models available for cascade.")
 
             
     # Set up paths

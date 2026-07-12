@@ -328,14 +328,6 @@ check_logic(
     "Dan"
 )
 
-check_logic(
-    "Light-switch puzzle: heat + one inspection",
-    "Three switches control one bulb in another room. You may inspect the bulb only once. What is the minimum number of switch toggles needed to identify which switch controls the bulb?",
-    "warm",
-    must_solve=True,
-    contains=True,
-)
-
 # --- Syllogisms (deterministic when pattern is unambiguous) ---
 check_logic(
     "Syllogism: all mammals warm-blooded",

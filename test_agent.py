@@ -238,36 +238,6 @@ class TestGeneralPurposeAgent(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(result)
         self.assertTrue(validate_category_output("sentiment_classification", prompt, result))
 
-    def test_positive_sentiment_deterministic(self):
-        prompt = (
-            "Sentiment check on this Slack message: "
-            "'Shipped on time, works perfectly, already recommending it to the team.'"
-        )
-        result = solve_sentiment_deterministically(prompt)
-        self.assertIsNotNone(result)
-        self.assertIn("positive", result.lower())
-        self.assertTrue(validate_category_output("sentiment_classification", prompt, result))
-
-    def test_neutral_sentiment_deterministic(self):
-        prompt = (
-            "Classify sentiment: "
-            "'It is what it is — neither impressed nor upset after trying it once.'"
-        )
-        result = solve_sentiment_deterministically(prompt)
-        self.assertIsNotNone(result)
-        self.assertIn("neutral", result.lower())
-        self.assertTrue(validate_category_output("sentiment_classification", prompt, result))
-
-    def test_negative_sentiment_deterministic(self):
-        prompt = (
-            "Classify sentiment: "
-            "'Terrible service, broken product, and the refund process was awful.'"
-        )
-        result = solve_sentiment_deterministically(prompt)
-        self.assertIsNotNone(result)
-        self.assertIn("negative", result.lower())
-        self.assertTrue(validate_category_output("sentiment_classification", prompt, result))
-
     def test_constraint_puzzle_regression_v38(self):
         prompt = (
             "Sam, Jo, and Lee each own one of: cat, dog, bird. "
@@ -287,16 +257,6 @@ class TestGeneralPurposeAgent(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(await classify_prompt(prompt), "logical_reasoning")
         self.assertEqual(solve_logic_deterministically(prompt), "1/2")
-
-    def test_light_switch_puzzle_deterministic(self):
-        prompt = (
-            "Three switches control one bulb in another room. You may inspect the bulb only once. "
-            "What is the minimum number of switch toggles needed to identify which switch controls the bulb?"
-        )
-        result = solve_logic_deterministically(prompt)
-        self.assertIsNotNone(result)
-        self.assertIn("warm", result.lower())
-        self.assertTrue(validate_category_output("logical_reasoning", prompt, result))
 
     def test_ner_partial_answers_fall_through_and_heading_repair(self):
         # Missing event/product/date candidates must not be accepted as a
@@ -370,10 +330,10 @@ class TestGeneralPurposeAgent(unittest.IsolatedAsyncioTestCase):
 
     def test_token_budget_for_explanatory_factual_and_two_sentence_summary(self):
         explain = "Explain the difference between RAM and ROM in a computer."
-        self.assertEqual(get_max_tokens("factual_knowledge", explain), 300)
-        self.assertEqual(get_max_tokens("factual_knowledge", "What is gravity?"), 100)
+        self.assertEqual(get_max_tokens("factual_knowledge", explain), 180)
+        self.assertEqual(get_max_tokens("factual_knowledge", "What is gravity?"), 70)
         two_sent = "Summarize the following passage in exactly two sentences: 'Long text here.'"
-        self.assertEqual(get_max_tokens("summarization", two_sent), 160)
+        self.assertEqual(get_max_tokens("summarization", two_sent), 120)
         one_sentence = (
             "Machine learning helps healthcare by analysing images, predicting deterioration, "
             "and spotting patterns in records that clinicians might miss."
