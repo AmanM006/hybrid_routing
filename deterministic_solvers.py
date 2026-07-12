@@ -349,30 +349,14 @@ def _solve_math_deterministically(prompt: str):
                     logger.info(f"[DETERM-MATH] buy/eat chain {nums[0]}+{nums[1]}-{nums[2]} = {total}")
                     return _fmt(total)
 
-    # --- 11h. Recipe proportion + total cost (before scale-only) ---------------
-    m_recipe_cost = re.search(
-        r"(\d+)\s*/\s*(\d+)\s*cups?\s+of\s+\w+\s+for\s+(\d+)",
-        pl,
-    )
-    m_price_cup = re.search(r"\$(\d+(?:\.\d+)?)\s+per\s+cup", pl)
-    target_qtys = [int(x) for x in re.findall(r"for\s+(\d+)\s+\w+", pl)]
-    if m_recipe_cost and m_price_cup and target_qtys and re.search(r"\btotal cost\b", pl):
-        num, den, base_qty = int(m_recipe_cost.group(1)), int(m_recipe_cost.group(2)), int(m_recipe_cost.group(3))
-        target_qty = target_qtys[-1]
-        if base_qty > 0:
-            cups = (num / den) * (target_qty / base_qty)
-            cost = cups * float(m_price_cup.group(1))
-            logger.info(f"[DETERM-MATH] recipe total cost {cups} cups @ ${m_price_cup.group(1)} = {cost}")
-            return f"${cost:.2f}"
-
-    # --- 11i. Recipe proportion scaling ---------------------------------------
+    # --- 11h. Recipe proportion scaling ---------------------------------------
     # "3/4 cup of sugar for 12 cookies. How much sugar for 30 cookies?"
     m_recipe = re.search(
         r"(\d+)\s*/\s*(\d+)\s*cups?\s+of\s+\w+\s+for\s+(\d+)\s+\w+",
         pl,
     )
     m_target = re.search(r"how much.*?for\s+(\d+)\s+\w+", pl)
-    if m_recipe and m_target and not re.search(r"\btotal cost\b", pl):
+    if m_recipe and m_target and not re.search(r"\bcost\b", pl.split("how much")[-1][:80]):
         num, den, base_qty = int(m_recipe.group(1)), int(m_recipe.group(2)), int(m_recipe.group(3))
         target_qty = int(m_target.group(1))
         if base_qty > 0:
@@ -480,7 +464,6 @@ _KNOWN_LOCATIONS = {
     "berlin", "oslo", "tokyo", "beijing", "sydney", "toronto", "dubai",
     "hawthorne", "palo alto", "cupertino", "seattle", "chicago", "boston",
     "washington", "mountain view", "rochester", "united states", "stanford",
-    "zurich", "geneva",
 }
 
 
@@ -596,8 +579,6 @@ def _extract_ner_source_text(prompt: str) -> str:
 def _extract_orgs(text: str):
     """Extract ORG entities: known orgs + spaced suffix + embedded suffix (TechCorp)."""
     orgs = []
-    for m in re.finditer(r"\bETH Zurich\b", text, re.IGNORECASE):
-        orgs.append("ETH Zurich")
     # Spaced suffix pattern: "Apple Inc.", "SpaceX Corp"
     for m in re.finditer(
         rf"\b([A-Z][A-Za-z0-9]+(?:\s+[A-Z][A-Za-z0-9]+)*)\s+{_ORG_SUFFIXES}",
@@ -984,8 +965,6 @@ def _solve_logic_deterministically(prompt: str):
         logger.info(f"[DETERM-LOGIC] Pigeonhole guarantee → {result}")
         return str(result)
 
-    # Light-switch puzzle removed in v40 — v39 deterministic answer regressed hidden eval 89.5%→78.9%.
-
     parsed = _parse_constraint_puzzle(prompt)  # pass original for Title-Case parsing
     if parsed is None:
         return None
@@ -1084,27 +1063,18 @@ _NEG_CUES = (
 )
 
 
-def _extract_review_text(prompt: str) -> str:
-    """Review body only — skip contraction apostrophes like What's."""
-    quoted = re.findall(r"(?<![A-Za-z])['\"]([^'\"]+)['\"]", prompt, re.DOTALL)
-    if quoted:
-        return max(quoted, key=len).lower()
-    return prompt.lower()
-
-
 def _solve_sentiment_deterministically(prompt: str):
     """
     High-confidence mixed sentiment only — both positive and negative cues with
-    an explicit contrast marker in the review text. Returns None when ambiguous.
+    an explicit contrast marker. Returns None when ambiguous.
     """
     pl = prompt.lower()
     if not re.search(r"\b(sentiment|classify|label|tone)\b", pl):
         return None
-    text = _extract_review_text(prompt)
-    if not re.search(r"\b(but|however|though|although|yet|while)\b", text):
+    if not re.search(r"\b(but|however|though|although|yet|while)\b", pl):
         return None
-    has_pos = any(cue in text for cue in _POS_CUES)
-    has_neg = any(cue in text for cue in _NEG_CUES)
+    has_pos = any(cue in pl for cue in _POS_CUES)
+    has_neg = any(cue in pl for cue in _NEG_CUES)
     if not (has_pos and has_neg):
         return None
     logger.info("[DETERM-SENT] High-confidence mixed sentiment")
@@ -1117,41 +1087,5 @@ def solve_sentiment_deterministically(prompt: str):
         return _solve_sentiment_deterministically(prompt)
     except Exception:
         logger.exception("[DETERM-SENT] Unexpected error — falling through")
-        return None
-
-
-# ---------------------------------------------------------------------------
-# CODE DEBUG SOLVER
-# ---------------------------------------------------------------------------
-
-def _solve_code_debug_deterministically(prompt: str):
-    """High-confidence patches for known debugging patterns."""
-    pl = prompt.lower()
-    if "binary search" in pl and "empty" in pl and "def bsearch" in pl:
-        logger.info("[DETERM-CODE] Binary search empty-array fix")
-        return (
-            "```python\n"
-            "def bsearch(a, x):\n"
-            "    if not a:\n"
-            "        return -1\n"
-            "    lo, hi = 0, len(a)\n"
-            "    while lo < hi:\n"
-            "        mid = (lo + hi) // 2\n"
-            "        if a[mid] < x:\n"
-            "            lo = mid + 1\n"
-            "        else:\n"
-            "            hi = mid\n"
-            "    return lo\n"
-            "```"
-        )
-    return None
-
-
-def solve_code_debug_deterministically(prompt: str):
-    """Public wrapper — never raises; returns None on any error."""
-    try:
-        return _solve_code_debug_deterministically(prompt)
-    except Exception:
-        logger.exception("[DETERM-CODE] Unexpected error — falling through")
         return None
 

@@ -276,14 +276,14 @@ print("=" * 65)
 print("LOGIC EDGE CASES (15 new)")
 print("=" * 65)
 
-def check_logic(label, prompt, expected, must_solve=True, contains=False):
+def check_logic(label, prompt, expected, must_solve=True):
     global PASS, FAIL
     got = solve_logic_deterministically(prompt)
     if must_solve:
         if got is None:
             print(f"  MISS  | {label}  (fell through — acceptable)")
             PASS += 1
-        elif (expected.lower() in got.lower() if contains else got.lower() == expected.lower()):
+        elif got.lower() == expected.lower():
             print(f"  PASS  | {label}  | Got={got!r}")
             PASS += 1
         else:

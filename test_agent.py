@@ -12,14 +12,8 @@ os.environ["ALLOWED_MODELS"] = "accounts/fireworks/models/llama-v3p1-8b-instruct
 from classifier import classify_prompt
 from validators import validate_category_output, coerce_ner_output
 from client import FireworksClient, get_emergency_fallback, get_max_tokens
-from deterministic_solvers import (
-    solve_ner_deterministically,
-    solve_sentiment_deterministically,
-    solve_logic_deterministically,
-    solve_math_deterministically,
-    solve_code_debug_deterministically,
-)
-from main import classify_model_roles, execute_task_pipeline
+from deterministic_solvers import solve_ner_deterministically, solve_sentiment_deterministically, solve_logic_deterministically
+from main import classify_model_roles
 import main
 
 class TestGeneralPurposeAgent(unittest.IsolatedAsyncioTestCase):
@@ -264,46 +258,6 @@ class TestGeneralPurposeAgent(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await classify_prompt(prompt), "logical_reasoning")
         self.assertEqual(solve_logic_deterministically(prompt), "1/2")
 
-    def test_recipe_total_cost_deterministic(self):
-        prompt = (
-            "A recipe requires 3/4 cup of sugar for 12 cookies. How much sugar is needed for 30 cookies? "
-            "If sugar costs $2.40 per cup, what is the total cost of sugar for 30 cookies?"
-        )
-        result = solve_math_deterministically(prompt)
-        self.assertIsNotNone(result)
-        self.assertIn("4.50", result)
-
-    def test_binary_search_empty_array_debug(self):
-        prompt = (
-            "Bug in binary search — misses when array is empty:\n"
-            "def bsearch(a, x):\n"
-            "    lo, hi = 0, len(a)\n"
-            "    while lo < hi:\n"
-            "        mid = (lo+hi)//2\n"
-            "        if a[mid] < x: lo = mid+1\n"
-            "        else: hi = mid\n"
-            "    return lo\n"
-            "Handle empty input safely."
-        )
-        result = solve_code_debug_deterministically(prompt)
-        self.assertIsNotNone(result)
-        self.assertIn("if not a", result)
-        self.assertTrue(validate_category_output("code_debugging", prompt, result))
-
-    async def test_zero_fireworks_skips_call_api(self):
-        client = FireworksClient("fake", "https://example.invalid/v1")
-        roles = classify_model_roles(["minimax-m3", "gemma-test"])
-        prompt = "What is the capital of France?"
-        with patch.object(main, "ZERO_FIREWORKS", True):
-            with patch.object(main, "local_disabled", True):
-                with patch.object(FireworksClient, "call_api", new_callable=AsyncMock) as mock_api:
-                    await execute_task_pipeline(
-                        "t-zero", prompt, roles, client,
-                        asyncio.Semaphore(1), asyncio.Semaphore(1),
-                    )
-                    mock_api.assert_not_called()
-        self.assertEqual(client.total_fireworks_tokens(), 0)
-
     def test_ner_partial_answers_fall_through_and_heading_repair(self):
         # Missing event/product/date candidates must not be accepted as a
         # confident deterministic extraction.
@@ -376,10 +330,10 @@ class TestGeneralPurposeAgent(unittest.IsolatedAsyncioTestCase):
 
     def test_token_budget_for_explanatory_factual_and_two_sentence_summary(self):
         explain = "Explain the difference between RAM and ROM in a computer."
-        self.assertEqual(get_max_tokens("factual_knowledge", explain), 180)
-        self.assertEqual(get_max_tokens("factual_knowledge", "What is gravity?"), 70)
+        self.assertEqual(get_max_tokens("factual_knowledge", explain), 300)
+        self.assertEqual(get_max_tokens("factual_knowledge", "What is gravity?"), 100)
         two_sent = "Summarize the following passage in exactly two sentences: 'Long text here.'"
-        self.assertEqual(get_max_tokens("summarization", two_sent), 120)
+        self.assertEqual(get_max_tokens("summarization", two_sent), 160)
         one_sentence = (
             "Machine learning helps healthcare by analysing images, predicting deterioration, "
             "and spotting patterns in records that clinicians might miss."

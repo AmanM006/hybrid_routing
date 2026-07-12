@@ -36,6 +36,16 @@ FROM --platform=linux/amd64 python:3.11-slim
 
 WORKDIR /app
 
+# Runtime shared libraries required by the llama.cpp server binary.
+# Without libcurl4/libgomp1 the binary fails at startup with
+# "libcurl.so.4: cannot open shared object file", which silently disabled
+# the bundled local model in every prior image.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libcurl4 \
+    libgomp1 \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
 # Copy the prepared virtual environment, model file, and server binary from builder
 COPY --from=builder /opt/venv /opt/venv
 COPY --from=builder /build/models /app/models
@@ -47,8 +57,6 @@ COPY main.py classifier.py validators.py client.py deterministic_solvers.py ./
 # Set paths and python environment variables
 ENV PATH="/opt/venv/bin:$PATH"
 ENV PYTHONUNBUFFERED=1
-ENV ZERO_FIREWORKS=true
-ENV SKIP_FW_HEALTHCHECK=true
 
 # Set the standard entrypoint
 ENTRYPOINT ["python", "main.py"]
