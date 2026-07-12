@@ -276,14 +276,14 @@ print("=" * 65)
 print("LOGIC EDGE CASES (15 new)")
 print("=" * 65)
 
-def check_logic(label, prompt, expected, must_solve=True):
+def check_logic(label, prompt, expected, must_solve=True, contains=False):
     global PASS, FAIL
     got = solve_logic_deterministically(prompt)
     if must_solve:
         if got is None:
             print(f"  MISS  | {label}  (fell through — acceptable)")
             PASS += 1
-        elif got.lower() == expected.lower():
+        elif (expected.lower() in got.lower() if contains else got.lower() == expected.lower()):
             print(f"  PASS  | {label}  | Got={got!r}")
             PASS += 1
         else:
@@ -326,6 +326,14 @@ check_logic(
     "4-person drinks (tighter constraints)",
     "Alice, Bob, Carol, and Dan each drink one of: tea, coffee, juice, water. Alice drinks tea. Bob drinks coffee. Carol does not drink juice. Who drinks juice?",
     "Dan"
+)
+
+check_logic(
+    "Light-switch puzzle: heat + one inspection",
+    "Three switches control one bulb in another room. You may inspect the bulb only once. What is the minimum number of switch toggles needed to identify which switch controls the bulb?",
+    "warm",
+    must_solve=True,
+    contains=True,
 )
 
 # --- Syllogisms (deterministic when pattern is unambiguous) ---
