@@ -70,6 +70,7 @@ async def classify_prompt(prompt: str, local_llm_callable=None) -> str:
     
     # High-priority logic puzzle check — constraint assignment puzzles
     # Catches "Sam, Jo, Lee each own/like/play/drink one of: cat, dog, bird"
+    # and inline "Mia, Noah, Priya each drink coffee, tea, or juice"
     _LOGIC_VERBS = r"(?:owns?|likes?|plays?|drinks?|wears?|prefers?|eats?|has|uses?|drives?)"
     if (
         any(x in prompt_lower for x in [
@@ -79,10 +80,18 @@ async def classify_prompt(prompt: str, local_llm_callable=None) -> str:
         ("is a" in prompt_lower and "always" in prompt_lower) or
         # "each [verb] one of: ..."  → assignment puzzle
         re.search(r"each\s+[a-z]+\s+one\s+of\b", prompt_lower) or
-        # "does not [verb]" as a negative constraint
+        # inline domain: "each drink coffee, tea, or juice"
+        re.search(
+            r"each\s+(?:" + _LOGIC_VERBS + r")\s+[a-z]+(?:,\s*[a-z]+)*(?:,?\s+or\s+[a-z]+)?",
+            prompt_lower,
+        ) or
+        # "does not [verb]" or "avoids" as a negative constraint
         re.search(r"does\s+not\s+(?:own|like|play|drink|wear|prefer|use|drive|eat)\b", prompt_lower) or
+        re.search(r"\bavoids?\b", prompt_lower) or
         # "who [verb]s the ..."  as the query
-        re.search(r"\bwho\s+(?:owns|likes|plays|drinks|wears|prefers|eats|uses|drives)\b", prompt_lower)
+        re.search(r"\bwho\s+(?:owns|likes|plays|drinks|wears|prefers|eats|uses|drives)\b", prompt_lower) or
+        # "what does Priya drink?"
+        re.search(r"what\s+does\s+[a-z]+\s+(?:" + _LOGIC_VERBS + r")", prompt_lower)
     ):
         return "logical_reasoning"
         

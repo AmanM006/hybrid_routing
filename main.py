@@ -36,6 +36,7 @@ from deterministic_solvers import (
     solve_ner_deterministically,
     solve_logic_deterministically,
     solve_sentiment_deterministically,
+    solve_summary_bullets_deterministically,
 )
 
 
@@ -87,6 +88,26 @@ def _is_simple_factual(prompt: str) -> bool:
     if p.count("?") > 1:
         return False
     return True
+
+
+def _is_logic_assignment(prompt: str) -> bool:
+    """True for finite-domain assignment puzzles (drink/own/like one-of-N)."""
+    p = prompt.strip().lower()
+    _verbs = r"(?:owns?|likes?|plays?|drinks?|wears?|prefers?|eats?|has|uses?|drives?)"
+    if re.search(r"each\s+[a-z]+\s+one\s+of\b", p):
+        return True
+    if re.search(
+        r"each\s+(?:" + _verbs + r")\s+[a-z]+(?:,\s*[a-z]+)*(?:,?\s+or\s+[a-z]+)?",
+        p,
+    ):
+        return True
+    if re.search(r"what\s+does\s+[a-z]+\s+(?:" + _verbs + r")", p):
+        return True
+    if re.search(r"\bwho\s+(?:" + _verbs + r")\b", p) and re.search(
+        r"\b(does not|doesn't|avoids?)\b", p
+    ):
+        return True
+    return False
 
 # DEV_MODE toggle (defaulting to False for production submission)
 DEV_MODE = os.environ.get("DEV_MODE", "false").lower() == "true"
@@ -447,6 +468,33 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
                 return {"task_id": task_id, "answer": det_answer}
         except Exception as e:
             logger.error(f"Task {task_id}: Sentiment deterministic solver raised an exception: {e}", exc_info=True)
+
+    # Assignment logic puzzles misclassified as factual — catch before local factual
+    if category == "factual_knowledge" and _is_logic_assignment(prompt):
+        try:
+            det_answer = solve_logic_deterministically(prompt)
+            if det_answer is not None:
+                logger.info(f"Task {task_id}: Solved deterministically (logic on factual route). Answer={det_answer!r}")
+                latency = time.time() - start_time
+                _print_task_log(
+                    task_id, category, "deterministic", "none", 0, True, latency, fw_tokens=0
+                )
+                return {"task_id": task_id, "answer": det_answer}
+        except Exception as e:
+            logger.error(f"Task {task_id}: Logic solver on factual route raised: {e}", exc_info=True)
+
+    if category == "summarization":
+        try:
+            det_answer = solve_summary_bullets_deterministically(prompt)
+            if det_answer is not None and _validate_output(category, prompt, det_answer):
+                logger.info(f"Task {task_id}: Solved deterministically (summary bullets). Answer={det_answer!r}")
+                latency = time.time() - start_time
+                _print_task_log(
+                    task_id, category, "deterministic", "none", 0, True, latency, fw_tokens=0
+                )
+                return {"task_id": task_id, "answer": det_answer}
+        except Exception as e:
+            logger.error(f"Task {task_id}: Summary bullet deterministic solver raised: {e}", exc_info=True)
     
     # 2. Local Tier — gated by LOCAL_ALLOWED_CATEGORIES (default: summarization only)
     local_allowed = _get_local_allowed_categories()
@@ -457,6 +505,9 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
     if local_eligible and category == "factual_knowledge" and not _is_simple_factual(prompt):
         local_eligible = False
         logger.info(f"Task {task_id}: Complex factual — routing remote for completeness.")
+    if local_eligible and category == "factual_knowledge" and _is_logic_assignment(prompt):
+        local_eligible = False
+        logger.info(f"Task {task_id}: Logic assignment puzzle — skip factual local.")
     if local_eligible and not local_disabled:
         async with local_sem:
             tier_used = "local"
@@ -471,6 +522,7 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
                 answer = client._scrub_cot(raw_answer, category)
                 if category == "summarization":
                     answer = client._enforce_summary_format(answer, prompt)
+                    answer = client._enforce_bullet_format(answer, prompt)
                 elif category == "named_entity_recognition":
                     answer = coerce_ner_output(answer, prompt)
                 validation_pass = _validate_output(category, prompt, answer)

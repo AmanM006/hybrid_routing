@@ -813,30 +813,42 @@ def _parse_constraint_puzzle(pl: str):
 
     entities_l = [e.lower() for e in entities]
 
-    # --- Extract values: "one of: X, Y, Z" or "different pets: X, Y, Z" ---
+    # --- Extract values: "one of: X, Y, Z" or inline "drink coffee, tea, or juice" ---
     val_prefix = re.search(
         r"(?:one of[:\s]+|(?:different\s+)?(?:pet|color|sport|subject|house|car|drink|flower|job|fruit|language|country)s?\s*:\s*)",
         pl.lower(),
     )
-    if not val_prefix:
+    values_l = None
+    if val_prefix:
+        rest = pl.lower()[val_prefix.end():]
+        stop = re.search(r"[.?!]", rest)
+        val_str = (rest[: stop.start()] if stop else rest).strip().rstrip(".")
+        values = [
+            re.sub(r"^(?:or|and)\s+", "", v.strip())
+            for v in re.split(r",\s*|\s+(?:and|or)\s+", val_str)
+            if v.strip()
+        ]
+        values = [v for v in values if len(v) > 1 and v not in ("the", "a", "an", "of", "or", "and")]
+        if values and len(values) == len(entities):
+            values_l = values
+    if values_l is None:
+        inline_vals = re.search(
+            r"(?:each\s+)?(?:" + _OWNS_VERBS + r")\s+([^.;?!]+)",
+            pl,
+            re.IGNORECASE,
+        )
+        if inline_vals:
+            val_str = inline_vals.group(1).strip().rstrip(".")
+            values = [
+                re.sub(r"^(?:or|and)\s+", "", v.strip())
+                for v in re.split(r",\s*|\s+(?:and|or)\s+", val_str)
+                if v.strip()
+            ]
+            values = [v for v in values if len(v) > 1 and v not in ("the", "a", "an", "of", "or", "and")]
+            if values and len(values) == len(entities):
+                values_l = values
+    if not values_l:
         return None
-
-    rest = pl.lower()[val_prefix.end():]
-    stop = re.search(r"[.?!]", rest)
-    val_str = (rest[: stop.start()] if stop else rest).strip().rstrip(".")
-    values = [
-        re.sub(r"^(?:or|and)\s+", "", v.strip())
-        for v in re.split(r",\s*|\s+(?:and|or)\s+", val_str)
-        if v.strip()
-    ]
-    values = [v for v in values if len(v) > 1 and v not in ("the", "a", "an", "of", "or", "and")]
-    if not values:
-        return None
-
-    if len(values) != len(entities):
-        return None  # domain size mismatch — unsafe
-
-    values_l = values  # already lowercase from .lower()
 
     # --- Parse constraints ---
     pos_constraints = []
@@ -864,6 +876,13 @@ def _parse_constraint_puzzle(pl: str):
         )
         if m_neg:
             ent, val = m_neg.group(1), m_neg.group(2)
+            if ent in entities_l and val in values_l:
+                neg_constraints.append((ent, val))
+
+        # Negative: "Mia avoids juice"
+        m_avoid = re.search(r"\b([a-z]+)\s+avoids?\s+(?:the\s+|a\s+)?([a-z]+)\b", s)
+        if m_avoid:
+            ent, val = m_avoid.group(1), m_avoid.group(2)
             if ent in entities_l and val in values_l:
                 neg_constraints.append((ent, val))
 
@@ -1055,6 +1074,70 @@ def solve_logic_deterministically(prompt: str):
         return _solve_logic_deterministically(prompt)
     except Exception:
         logger.exception("[DETERM-LOGIC] Unexpected error — falling through")
+        return None
+
+
+# ---------------------------------------------------------------------------
+# SUMMARY BULLET SOLVER (semicolon-delimited source text)
+# ---------------------------------------------------------------------------
+
+def _trim_words(text: str, limit: int) -> str:
+    words = text.strip().split()
+    if len(words) <= limit:
+        return text.strip()
+    return " ".join(words[:limit])
+
+
+def _parse_bullet_spec(prompt: str) -> tuple[int, int] | None:
+    """Return (bullet_count, per_bullet_word_limit) or None."""
+    _count_words = {
+        "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+        "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+    }
+    pl = prompt.lower()
+    count_match = re.search(
+        r"\b(?:exactly\s+)?(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+bullet\s*points?\b",
+        pl,
+    )
+    if not count_match:
+        return None
+    tok = count_match.group(1).lower()
+    count = int(tok) if tok.isdigit() else _count_words.get(tok)
+    if count is None:
+        return None
+    per_match = re.search(
+        r"\b(?:max(?:imum)?|at most|up to|under|no longer than)\s+(\d+)\s+words?\s+each\b",
+        pl,
+    )
+    if not per_match:
+        per_match = re.search(
+            r"\beach\s+(?:no longer than|under|at most|max(?:imum)?|up to)?\s*(\d+)\s+words?\b",
+            pl,
+        )
+    per_limit = int(per_match.group(1)) if per_match else 15
+    return count, per_limit
+
+
+def solve_summary_bullets_deterministically(prompt: str):
+    """
+    Build bullet summaries from semicolon-separated source after final ':'.
+    Zero tokens; only when bullet count matches clause count exactly.
+    """
+    try:
+        spec = _parse_bullet_spec(prompt)
+        if spec is None:
+            return None
+        count, per_limit = spec
+        if ":" not in prompt:
+            return None
+        source = prompt.rsplit(":", 1)[-1].strip().rstrip(".")
+        clauses = [c.strip() for c in source.split(";") if c.strip()]
+        if len(clauses) != count:
+            return None
+        bullets = [_trim_words(c, per_limit) for c in clauses]
+        return "\n".join(f"- {b}" for b in bullets)
+    except Exception:
+        logger.exception("[DETERM-SUM] Unexpected error — falling through")
         return None
 
 

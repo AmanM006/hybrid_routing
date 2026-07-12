@@ -274,23 +274,37 @@ def validate_summarization(prompt: str, output: str) -> bool:
     prompt_lower = prompt.lower()
 
     per_bullet_word_match = re.search(
-        r"\beach\s+(?:no longer than|under|at most|max(?:imum)?|up to)?\s*(\d+)\s*words?\b",
+        r"\b(?:max(?:imum)?|at most|up to|under|no longer than)\s+(\d+)\s+words?\s+each\b",
         prompt_lower,
     )
+    if not per_bullet_word_match:
+        per_bullet_word_match = re.search(
+            r"\beach\s+(?:no longer than|under|at most|max(?:imum)?|up to)?\s*(\d+)\s+words?\b",
+            prompt_lower,
+        )
     bullet_count_exact = re.search(
         r"\bexactly\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+bullet\s*points?\b",
         prompt_lower,
     )
+    bullet_count_loose = None
+    if not bullet_count_exact:
+        bullet_count_loose = re.search(
+            r"\b(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+bullet\s*points?\b",
+            prompt_lower,
+        )
 
-    if per_bullet_word_match or bullet_count_exact:
+    if per_bullet_word_match or bullet_count_exact or bullet_count_loose:
         bullets = _extract_bullets(output_clean)
+        expected = None
         if bullet_count_exact:
             expected = _parse_count(bullet_count_exact.group(1))
-            if expected is None or len(bullets) != expected:
-                logger.warning(
-                    f"Summarization Validation Failed: Expected exactly {expected} bullet points, got {len(bullets)}."
-                )
-                return False
+        elif bullet_count_loose:
+            expected = _parse_count(bullet_count_loose.group(1))
+        if expected is not None and len(bullets) != expected:
+            logger.warning(
+                f"Summarization Validation Failed: Expected exactly {expected} bullet points, got {len(bullets)}."
+            )
+            return False
         if per_bullet_word_match:
             per_limit = int(per_bullet_word_match.group(1))
             if not bullets:

@@ -69,7 +69,13 @@ def get_max_tokens(category: str, prompt: str) -> int:
     elif category == "summarization":
         prompt_lower = prompt.lower()
         if re.search(r"bullet\s*points?", prompt_lower):
-            return 120
+            per_match = re.search(
+                r"\b(?:max(?:imum)?|at most|up to)\s+(\d+)\s+words?\s+each\b",
+                prompt_lower,
+            )
+            if per_match:
+                return min(80, int(per_match.group(1)) * 3 + 20)
+            return 80
         if re.search(r"\bexactly\s+(?:\d+|one|two|three|four|five)\s+sentences?\b", prompt_lower):
             return 160
         word_limit_match = re.search(r"(\d+)\s*words?", prompt_lower)
@@ -84,7 +90,7 @@ def get_max_tokens(category: str, prompt: str) -> int:
             prompt_lower,
         ):
             return 250
-        return 100
+        return 70
     elif category == "math_reasoning":
         return 120
     elif category == "logical_reasoning":
@@ -117,6 +123,21 @@ def get_user_prompt_suffix(category: str, prompt: str) -> str:
                 )
             if n is not None:
                 return f"\n\nExactly {n} complete sentences."
+        if re.search(r"bullet\s*points?", prompt.lower()):
+            per_match = re.search(
+                r"\b(?:max(?:imum)?|at most|up to)\s+(\d+)\s+words?\s+each\b",
+                prompt.lower(),
+            )
+            per = per_match.group(1) if per_match else "15"
+            count_match = re.search(
+                r"\b(?:exactly\s+)?(\d+|one|two|three|four|five)\s+bullet\s*points?\b",
+                prompt.lower(),
+            )
+            n_bullets = _parse_count_token(count_match.group(1)) if count_match else 3
+            return (
+                f"\n\nOutput exactly {n_bullets} bullet points as lines starting with '- '. "
+                f"Each bullet max {per} words. No preamble."
+            )
         return "\n\nSummary:"
     if category == "factual_knowledge":
         return "\n\nPlain prose. No markdown."
@@ -358,6 +379,48 @@ class FireworksClient:
                         return f"{first} {second}"
         return text
 
+    @staticmethod
+    def _enforce_bullet_format(text: str, prompt: str) -> str:
+        """Trim/reformat bullet summaries to match per-bullet word caps."""
+        pl = prompt.lower()
+        if not re.search(r"bullet\s*points?", pl):
+            return text
+        per_match = re.search(
+            r"\b(?:max(?:imum)?|at most|up to|under|no longer than)\s+(\d+)\s+words?\s+each\b",
+            pl,
+        )
+        if not per_match:
+            per_match = re.search(
+                r"\beach\s+(?:no longer than|under|at most|max(?:imum)?|up to)?\s*(\d+)\s+words?\b",
+                pl,
+            )
+        per_limit = int(per_match.group(1)) if per_match else None
+        if per_limit is None:
+            return text
+
+        lines = [ln.strip() for ln in text.strip().splitlines() if ln.strip()]
+        bullets = []
+        for ln in lines:
+            m = re.match(r"^[-*•]\s+(.+)$", ln) or re.match(r"^\d+[.)]\s+(.+)$", ln)
+            bullets.append(m.group(1).strip() if m else ln)
+
+        if not bullets and ":" in prompt:
+            source = prompt.rsplit(":", 1)[-1].strip().rstrip(".")
+            clauses = [c.strip() for c in source.split(";") if c.strip()]
+            if len(clauses) >= 2:
+                bullets = clauses
+
+        if not bullets:
+            return text
+
+        trimmed = []
+        for b in bullets:
+            words = b.split()
+            if len(words) > per_limit:
+                b = " ".join(words[:per_limit])
+            trimmed.append(b)
+        return "\n".join(f"- {b}" for b in trimmed)
+
 
     async def _acquire_remote_budget(self, category: str, count_toward_budget: bool) -> None:
         if not count_toward_budget or self.max_remote_calls is None:
@@ -467,6 +530,7 @@ class FireworksClient:
                     scrubbed = self._scrub_cot(final_text, category)
                     if category == "summarization":
                         scrubbed = self._enforce_summary_format(scrubbed, prompt)
+                        scrubbed = self._enforce_bullet_format(scrubbed, prompt)
                     return scrubbed
                 else:
                     raise ValueError("Received empty content and reasoning from remote model.")
