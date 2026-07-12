@@ -314,33 +314,6 @@ def _print_task_log(
     )
 
 
-def _pick_remote_model(roles: dict, category: str) -> str | None:
-    """One model per task — reasoning for quality, code role for code tasks."""
-    if category in ("code_generation", "code_debugging"):
-        return roles.get("code") or roles.get("reasoning")
-    return roles.get("reasoning") or roles.get("mid") or roles.get("cheap")
-
-
-async def _fire_remote_once(
-    client,
-    roles,
-    category: str,
-    prompt: str,
-    timeout: float = 12.0,
-    model: str | None = None,
-) -> tuple[str, bool]:
-    model = model or _pick_remote_model(roles, category)
-    if not model:
-        return "", False
-    answer = await client.call_api(
-        model=model,
-        category=category,
-        prompt=prompt,
-        timeout=timeout,
-    )
-    return answer, _validate_output(category, prompt, answer)
-
-
 async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remote_sem):
     """
     The full cascade routing implementation.
@@ -354,8 +327,15 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
         
     category = await classify_prompt(prompt, local_llm_callable=local_callable)
     
+    easy_categories = [
+        "factual_knowledge",
+        "summarization",
+        # sentiment_classification: skip local tier — gemma returns label-only without justification
+        # named_entity_recognition: deterministic first-pass, then direct-remote if that fails
+    ]
+    
     tier_used = "unknown"
-    model_name = "none"
+    model_name = "local"
     answer = ""
     validation_pass = False
     start_time = time.time()
@@ -415,79 +395,288 @@ async def execute_task_pipeline(task_id, prompt, roles, client, local_sem, remot
                 return {"task_id": task_id, "answer": det_answer}
         except Exception as e:
             logger.error(f"Task {task_id}: Sentiment deterministic solver raised an exception: {e}", exc_info=True)
-
-    # 3. Single-shot Fireworks — one call per task, reasoning model (v38-accurate path)
-    async with remote_sem:
-        if category == "named_entity_recognition":
-            model_name = _pick_remote_model(roles, category) or "none"
-            tier_used = "direct-remote"
+    
+    # 2. Local Tier (Easy categories)
+    skip_local = (
+        category == "summarization"
+        and re.search(
+            r"\bexactly\s+(?:\d+|one|two|three|four|five)\s+sentences?\b",
+            prompt.lower(),
+        )
+    )
+    if category in easy_categories and not local_disabled and not skip_local:
+        async with local_sem:
+            tier_used = "local"
             try:
-                raw = await client.call_api(
-                    model=model_name,
-                    category=category,
-                    prompt=prompt,
-                    timeout=14.0,
-                )
-                coerced, ok = coerce_ner_output(raw, prompt)
-                if ok:
-                    answer = coerced
-                    validation_pass = True
-                    logger.info(f"Task {task_id}: NER single-shot passed validation.")
+                system_prompt = SYSTEM_PROMPTS.get(category, "Answer the query.")
+                user_prompt = prompt + get_user_prompt_suffix(category, prompt)
+                # Token budget per category: summarization needs room for a full sentence,
+                # sentiment needs label+justification, NER needs JSON, others stay concise.
+                if category == "summarization":
+                    max_tokens = get_max_tokens(category, prompt)
+                elif category == "sentiment_classification":
+                    max_tokens = 100
+                elif category == "named_entity_recognition":
+                    max_tokens = 70
+                elif category == "factual_knowledge":
+                    max_tokens = get_max_tokens(category, prompt)
                 else:
-                    coerced2, ok2 = coerce_ner_output(raw, prompt)
-                    if ok2:
-                        answer = coerced2
-                        validation_pass = True
-                    else:
-                        answer = get_emergency_fallback(category, prompt)
-                        logger.warning(f"Task {task_id}: NER repair failed; schema-safe fallback.")
-            except Exception as e:
-                logger.warning(f"Task {task_id}: NER single-shot failed: {e}")
-                answer = get_emergency_fallback(category, prompt)
-
-        elif category in ("code_generation", "code_debugging"):
-            code_model = roles.get("code")
-            tier_used = "direct-remote"
-            model_name = code_model or _pick_remote_model(roles, category) or "none"
-            try:
-                if model_name:
-                    answer, validation_pass = await _fire_remote_once(
-                        client, roles, category, prompt, timeout=20.0, model=model_name
-                    )
-                    if validation_pass:
-                        logger.info(f"Task {task_id}: Code single-shot passed validation.")
-            except Exception as e:
-                logger.warning(f"Task {task_id}: Code single-shot failed: {e}")
-            if not validation_pass:
-                reasoning = roles.get("reasoning")
-                if reasoning and reasoning != model_name:
-                    tier_used = "reasoning-fallback"
-                    model_name = reasoning
-                    try:
-                        answer, validation_pass = await _fire_remote_once(
-                            client, roles, category, prompt, timeout=14.0, model=reasoning
-                        )
-                        if validation_pass:
-                            logger.info(f"Task {task_id}: Code reasoning fallback passed validation.")
-                    except Exception as e:
-                        logger.warning(f"Task {task_id}: Code reasoning fallback failed: {e}")
-            if not validation_pass:
-                answer = get_emergency_fallback(category, prompt)
-
-        else:
-            model_name = _pick_remote_model(roles, category) or "none"
-            tier_used = "direct-remote"
-            try:
-                answer, validation_pass = await _fire_remote_once(
-                    client, roles, category, prompt, timeout=12.0, model=model_name
+                    max_tokens = min(35, get_max_tokens(category, prompt))
+                raw_answer = await asyncio.wait_for(
+                    call_local_model(system_prompt, user_prompt, max_tokens),
+                    timeout=40.0
                 )
+                answer = client._scrub_cot(raw_answer, category)
+                if category == "summarization":
+                    answer = client._enforce_summary_format(answer, prompt)
+                validation_pass = _validate_output(category, prompt, answer)
                 if validation_pass:
-                    logger.info(f"Task {task_id}: Single-shot remote passed validation.")
+                    verification_pass = await verify_local_answer(category, prompt, answer)
+                    if verification_pass:
+                        logger.info(f"Task {task_id}: Local model passed validation and self-verification.")
+                    else:
+                        logger.info(f"Task {task_id}: Local model self-verification failed. Escalating...")
+                        validation_pass = False
+                else:
+                    logger.info(f"Task {task_id}: Local model failed structural validation. Escalating to cheap remote...")
+            except asyncio.TimeoutError:
+                logger.warning(f"Task {task_id}: Local model execution timed out. Escalating...")
             except Exception as e:
-                logger.warning(f"Task {task_id}: Single-shot remote failed: {e}")
-            if not validation_pass:
-                answer = get_emergency_fallback(category, prompt)
+                logger.warning(f"Task {task_id}: Local model execution failed: {e}. Escalating...")
+            
+    # 3. Remote Tier Cascade (Easy categories on escalation or local disabled)
+    if category in easy_categories and not validation_pass:
+        async with remote_sem:
+            easy_tiers = _dedupe_cascade_tiers(roles, [
+                ("cheap-remote", "cheap", 9.0),
+                ("mid-remote", "mid", 9.0),
+                ("reasoning-fallback", "reasoning", 12.0),
+            ])
+            for tier_name, model, timeout in easy_tiers:
+                if validation_pass:
+                    break
+                tier_used = tier_name
+                model_name = model
+                try:
+                    if tier_name == "reasoning-fallback":
+                        logger.info(f"Task {task_id}: Easy category falling back to reasoning model: {model_name}")
+                    answer = await client.call_api(
+                        model=model,
+                        category=category,
+                        prompt=prompt,
+                        timeout=timeout,
+                    )
+                    validation_pass = _validate_output(category, prompt, answer)
+                    if validation_pass:
+                        if tier_name == "cheap-remote":
+                            logger.info(f"Task {task_id}: Cheap remote model passed validation.")
+                        elif tier_name == "mid-remote":
+                            logger.info(f"Task {task_id}: Mid remote model passed validation.")
+                        else:
+                            logger.info(f"Task {task_id}: Easy category reasoning fallback passed validation.")
+                except Exception as e:
+                    if tier_name == "cheap-remote":
+                        logger.warning(f"Task {task_id}: Cheap remote model failed: {e}. Escalating...")
+                    elif tier_name == "mid-remote":
+                        logger.warning(f"Task {task_id}: Mid remote model failed: {e}. Escalating...")
+                    else:
+                        logger.warning(f"Task {task_id}: Easy category reasoning fallback failed: {e}. Escalating...")
 
+            if not validation_pass:
+                logger.warning(f"Task {task_id}: All remote models failed for Easy Category. Falling back to emergency placeholder.")
+                answer = get_emergency_fallback(category, prompt)
+                        
+    # 4. Direct-to-remote categories
+    if category not in easy_categories:
+        async with remote_sem:
+            validation_pass = False
+            if category in ["math_reasoning", "logical_reasoning"]:
+                math_tiers = _dedupe_cascade_tiers(roles, [
+                    ("direct-remote", "reasoning", 14.0),
+                    ("mid-fallback", "mid", 12.0),
+                    ("cheap-fallback", "cheap", 10.0),
+                ])
+                for tier_name, model, timeout in math_tiers:
+                    if validation_pass:
+                        break
+                    tier_used = tier_name
+                    model_name = model
+                    try:
+                        if tier_name != "direct-remote":
+                            logger.info(f"Task {task_id}: Math/Logic falling back to {tier_name.replace('-fallback', '')} model: {model_name}")
+                        answer = await client.call_api(
+                            model=model,
+                            category=category,
+                            prompt=prompt,
+                            timeout=timeout,
+                        )
+                        validation_pass = _validate_output(category, prompt, answer)
+                        if validation_pass:
+                            if tier_name == "direct-remote":
+                                logger.info(f"Task {task_id}: Reasoning model passed validation.")
+                            elif tier_name == "mid-fallback":
+                                logger.info(f"Task {task_id}: Math/Logic mid fallback model passed validation.")
+                            else:
+                                logger.info(f"Task {task_id}: Math/Logic cheap fallback model passed validation.")
+                    except Exception as e:
+                        if tier_name == "direct-remote":
+                            logger.warning(f"Task {task_id}: Reasoning model failed: {e}. Escalating...")
+                        elif tier_name == "mid-fallback":
+                            logger.warning(f"Task {task_id}: Math/Logic mid fallback failed: {e}. Escalating...")
+                        else:
+                            logger.warning(f"Task {task_id}: Math/Logic cheap fallback failed: {e}. Escalating...")
+
+                if not validation_pass:
+                    logger.warning(f"Task {task_id}: All models failed for Math/Logic. Falling back to emergency placeholder.")
+                    answer = get_emergency_fallback(category, prompt)
+                            
+            elif category in ["code_debugging", "code_generation"]:
+                code_tiers = _dedupe_cascade_tiers(roles, [
+                    ("direct-remote", "code", 14.0),
+                    ("mid-fallback", "mid", 12.0),
+                    ("cheap-fallback", "cheap", 10.0),
+                    ("reasoning-fallback", "reasoning", 12.0),
+                ])
+                for tier_name, model, timeout in code_tiers:
+                    if validation_pass:
+                        break
+                    tier_used = tier_name
+                    model_name = model
+                    try:
+                        if tier_name != "direct-remote":
+                            logger.info(f"Task {task_id}: Code falling back to {tier_name.replace('-fallback', '')} model: {model_name}")
+                        answer = await client.call_api(
+                            model=model,
+                            category=category,
+                            prompt=prompt,
+                            timeout=timeout,
+                        )
+                        validation_pass = _validate_output(category, prompt, answer)
+                        if validation_pass:
+                            if tier_name == "direct-remote":
+                                logger.info(f"Task {task_id}: Code model passed validation.")
+                            elif tier_name == "mid-fallback":
+                                logger.info(f"Task {task_id}: Code mid fallback model passed validation.")
+                            elif tier_name == "cheap-fallback":
+                                logger.info(f"Task {task_id}: Code cheap fallback model passed validation.")
+                            else:
+                                logger.info(f"Task {task_id}: Code reasoning fallback model passed validation.")
+                    except Exception as e:
+                        if tier_name == "direct-remote":
+                            logger.warning(f"Task {task_id}: Code model failed: {e}. Escalating...")
+                        elif tier_name == "mid-fallback":
+                            logger.warning(f"Task {task_id}: Code mid fallback failed: {e}. Escalating...")
+                        elif tier_name == "cheap-fallback":
+                            logger.warning(f"Task {task_id}: Code cheap fallback failed: {e}. Escalating...")
+                        else:
+                            logger.warning(f"Task {task_id}: Code reasoning fallback failed: {e}")
+
+                if not validation_pass:
+                    logger.warning(f"Task {task_id}: All models failed for Code. Falling back to emergency placeholder.")
+                    answer = get_emergency_fallback(category, prompt)
+
+            elif category == "sentiment_classification":
+                # Accuracy-first: mid → reasoning → cheap (no code). v23 cheap-only regressed.
+                sentiment_tiers = _dedupe_cascade_tiers(roles, [
+                    ("mid-fallback", "mid", 10.0),
+                    ("reasoning-fallback", "reasoning", 12.0),
+                    ("cheap-fallback", "cheap", 9.0),
+                ])
+                for tier_name, model, timeout in sentiment_tiers:
+                    if validation_pass:
+                        break
+                    tier_used = tier_name
+                    model_name = model
+                    try:
+                        answer = await client.call_api(
+                            model=model,
+                            category=category,
+                            prompt=prompt,
+                            timeout=timeout,
+                        )
+                        validation_pass = _validate_output(category, prompt, answer)
+                        if validation_pass:
+                            logger.info(f"Task {task_id}: Sentiment {tier_name} passed validation.")
+                    except Exception as e:
+                        logger.warning(f"Task {task_id}: Sentiment {tier_name} failed: {e}")
+
+                if not validation_pass:
+                    logger.warning(f"Task {task_id}: Sentiment cascade exhausted — emergency fallback.")
+                    answer = get_emergency_fallback(category, prompt)
+
+            elif category == "named_entity_recognition":
+                best_raw = ""
+                # Accuracy-first NER: reasoning → mid → cheap (no code). Mid-first hurt v23.
+                ner_tiers = [
+                    ("direct-remote", roles.get("reasoning"), 14.0),
+                    ("mid-fallback", roles.get("mid"), 12.0),
+                    ("cheap-fallback", roles.get("cheap"), 10.0),
+                ]
+                seen_models = set()
+                for tier_name, model, timeout in ner_tiers:
+                    if not model or model in seen_models:
+                        continue
+                    seen_models.add(model)
+                    tier_used = tier_name
+                    model_name = model
+                    try:
+                        raw = await client.call_api(
+                            model=model,
+                            category=category,
+                            prompt=prompt,
+                            timeout=timeout,
+                        )
+                        if raw and len(raw) > len(best_raw):
+                            best_raw = raw
+                        coerced, ok = coerce_ner_output(raw, prompt)
+                        if ok:
+                            answer = coerced
+                            validation_pass = True
+                            logger.info(f"Task {task_id}: NER model {model} passed validation.")
+                            break
+                    except Exception as e:
+                        logger.warning(f"Task {task_id}: NER model {model} failed: {e}")
+
+                if not validation_pass and best_raw:
+                    coerced, ok = coerce_ner_output(best_raw, prompt)
+                    if ok:
+                        answer = coerced
+                        validation_pass = True
+                        logger.info(f"Task {task_id}: NER repaired best remote attempt.")
+                    else:
+                        # Never emit non-JSON for a JSON-contract category.
+                        answer = get_emergency_fallback(category, prompt)
+                        logger.warning(
+                            f"Task {task_id}: NER repair failed; returning schema-safe fallback."
+                        )
+
+                if not validation_pass and not best_raw:
+                    logger.warning(f"Task {task_id}: No NER API response — empty entities fallback.")
+                    answer = get_emergency_fallback(category, prompt)
+
+            else:
+                # Catch-all for any unhandled category (e.g. factual_knowledge when local disabled)
+                best_model = roles.get("reasoning") or roles.get("mid") or roles.get("cheap")
+                if best_model:
+                    tier_used = "direct-remote"
+                    model_name = best_model
+                    try:
+                        answer = await client.call_api(
+                            model=best_model,
+                            category=category,
+                            prompt=prompt,
+                            timeout=12.0
+                        )
+                        validation_pass = _validate_output(category, prompt, answer)
+                        if validation_pass:
+                            logger.info(f"Task {task_id}: Catch-all model passed validation.")
+                    except Exception as e:
+                        logger.warning(f"Task {task_id}: Catch-all model failed: {e}")
+
+                if not validation_pass:
+                    answer = get_emergency_fallback(category, prompt)
+
+                            
     # Log information to stdout only
     latency = time.time() - start_time
     approx_tokens = len(answer) // 4
@@ -549,57 +738,66 @@ async def main():
     # 2. Setup client
     client = FireworksClient(api_key=api_key, base_url=base_url)
     
-    # Run startup model connectivity check — prune dead models from the role assignment
-    skip_healthcheck = os.environ.get("SKIP_FW_HEALTHCHECK", "1").lower() in ("1", "true", "yes")
-    if skip_healthcheck:
-        logger.info("Skipping Fireworks healthcheck (SKIP_FW_HEALTHCHECK=1)")
-        tokens_after_healthcheck = 0
-    else:
-        logger.info("Starting Fireworks connectivity healthcheck for all allowed models...")
-        live_models = []
-        dead_models = []
-        for model_name in allowed_models:
-            try:
-                logger.info(f"Healthcheck: sending test ping to {model_name}...")
-                await client.call_api(
-                    model=model_name,
-                    category="factual_knowledge",
-                    prompt="hello",
-                    timeout=2.0
-                )
-                logger.info(f"Healthcheck for '{model_name}': SUCCESS (200)")
+    # Run startup model connectivity check — prune dead models from the role assignment.
+    # Only ping the models we actually route to (reasoning + code). Skipping dead gemma
+    # variants saves ~150 tokens vs pinging every ALLOWED_MODELS entry, and yields the
+    # same live role table v38 ends up with after 404-pruning.
+    ping_targets: list[str] = []
+    for role_key in ("reasoning", "code"):
+        model_name = roles.get(role_key)
+        if model_name and model_name not in ping_targets:
+            ping_targets.append(model_name)
+
+    logger.info(f"Starting Fireworks healthcheck for task models: {ping_targets}")
+    live_models = []
+    dead_models = []
+    for model_name in ping_targets:
+        try:
+            logger.info(f"Healthcheck: sending test ping to {model_name}...")
+            await client.call_api(
+                model=model_name,
+                category="factual_knowledge",
+                prompt="hello",
+                timeout=2.0,
+                max_tokens_override=5,
+            )
+            logger.info(f"Healthcheck for '{model_name}': SUCCESS (200)")
+            live_models.append(model_name)
+        except Exception as e:
+            err_str = str(e)
+            if "404" in err_str or "NOT_FOUND" in err_str or "not found" in err_str.lower():
+                # 404 is deterministic — model doesn't exist. Mark dead immediately, no retry.
+                logger.warning(f"Healthcheck for '{model_name}': DEAD (404 — removing from cascade)")
+                dead_models.append(model_name)
+            elif "429" in err_str or "RATE_LIMIT" in err_str:
+                # Rate limit during healthcheck — model exists, just busy. Keep it.
+                logger.warning(f"Healthcheck for '{model_name}': SOFT_FAIL 429 (keeping in cascade)")
                 live_models.append(model_name)
-            except Exception as e:
-                err_str = str(e)
-                if "404" in err_str or "NOT_FOUND" in err_str or "not found" in err_str.lower():
-                    logger.warning(f"Healthcheck for '{model_name}': DEAD (404 — removing from cascade)")
-                    dead_models.append(model_name)
-                elif "429" in err_str or "RATE_LIMIT" in err_str:
-                    logger.warning(f"Healthcheck for '{model_name}': SOFT_FAIL 429 (keeping in cascade)")
-                    live_models.append(model_name)
-                else:
-                    logger.warning(f"Healthcheck for '{model_name}': SOFT_FAIL (keeping in cascade) — {e}")
-                    live_models.append(model_name)
+            else:
+                # Other failure (timeout, 5xx) — keep the model, may recover
+                logger.warning(f"Healthcheck for '{model_name}': SOFT_FAIL (keeping in cascade) — {e}")
+                live_models.append(model_name)
 
-        tokens_after_healthcheck = client.total_fireworks_tokens()
-        print(
-            f"FIREWORKS_HEALTHCHECK: calls={client.total_calls} | "
-            f"prompt={client.total_prompt_tokens} | completion={client.total_completion_tokens} | "
-            f"total={tokens_after_healthcheck}",
-            flush=True,
-        )
-
-        if dead_models:
-            logger.warning(f"Pruned {len(dead_models)} dead models from cascade: {dead_models}")
-
-        if live_models:
-            roles = classify_model_roles(live_models)
-            print("=== UPDATED ROLE TABLE (live models only) ===")
-            for role, model in roles.items():
-                print(f"Role '{role}': {model}")
-            print("=============================================")
-        else:
-            logger.error("All models failed healthcheck — cannot process tasks.")
+    tokens_after_healthcheck = client.total_fireworks_tokens()
+    print(
+        f"FIREWORKS_HEALTHCHECK: calls={client.total_calls} | "
+        f"prompt={client.total_prompt_tokens} | completion={client.total_completion_tokens} | "
+        f"total={tokens_after_healthcheck}",
+        flush=True,
+    )
+    
+    if dead_models:
+        logger.warning(f"Pruned {len(dead_models)} dead models from cascade: {dead_models}")
+    
+    # Re-classify roles using only live models
+    if live_models:
+        roles = classify_model_roles(live_models)
+        print("=== UPDATED ROLE TABLE (live models only) ===")
+        for role, model in roles.items():
+            print(f"Role '{role}': {model}")
+        print("=============================================")
+    else:
+        logger.error("All models failed healthcheck — cannot process tasks.")
 
             
     # Set up paths
@@ -637,15 +835,8 @@ async def main():
     # Initial write to guarantee valid JSON file at any moment
     write_output_results(results_map, output_path)
     
-    # 4. Local server — disabled by default (v38-accurate remote path; saves RAM/CPU)
-    global local_disabled
-    disable_local = os.environ.get("DISABLE_LOCAL", "1").lower() in ("1", "true", "yes")
-    if disable_local:
-        local_disabled = True
-        proc = None
-        logger.info("Local tier disabled (DISABLE_LOCAL=1)")
-    else:
-        proc = start_local_server()
+    # 4. Start local server (if GGUF model is present)
+    proc = start_local_server()
     
     # 5. Run tasks concurrently
     max_local_concurrency = int(os.environ.get("MAX_LOCAL_CONCURRENCY", "3"))

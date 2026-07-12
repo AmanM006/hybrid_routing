@@ -36,6 +36,7 @@ FROM --platform=linux/amd64 python:3.11-slim
 
 WORKDIR /app
 
+# libcurl4/libgomp1: llama-server starts cleanly (v43 infra fix; routing unchanged)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libcurl4 \
     libgomp1 \
@@ -53,8 +54,6 @@ COPY main.py classifier.py validators.py client.py deterministic_solvers.py ./
 # Set paths and python environment variables
 ENV PATH="/opt/venv/bin:$PATH"
 ENV PYTHONUNBUFFERED=1
-ENV DISABLE_LOCAL=1
-ENV SKIP_FW_HEALTHCHECK=1
 
 # Set the standard entrypoint
 ENTRYPOINT ["python", "main.py"]

@@ -330,10 +330,10 @@ class TestGeneralPurposeAgent(unittest.IsolatedAsyncioTestCase):
 
     def test_token_budget_for_explanatory_factual_and_two_sentence_summary(self):
         explain = "Explain the difference between RAM and ROM in a computer."
-        self.assertEqual(get_max_tokens("factual_knowledge", explain), 220)
-        self.assertEqual(get_max_tokens("factual_knowledge", "What is gravity?"), 70)
+        self.assertEqual(get_max_tokens("factual_knowledge", explain), 300)
+        self.assertEqual(get_max_tokens("factual_knowledge", "What is gravity?"), 100)
         two_sent = "Summarize the following passage in exactly two sentences: 'Long text here.'"
-        self.assertEqual(get_max_tokens("summarization", two_sent), 120)
+        self.assertEqual(get_max_tokens("summarization", two_sent), 160)
         one_sentence = (
             "Machine learning helps healthcare by analysing images, predicting deterioration, "
             "and spotting patterns in records that clinicians might miss."
