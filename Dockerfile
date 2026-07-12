@@ -27,6 +27,11 @@ RUN curl -L -o /tmp/llama.zip https://github.com/ggml-org/llama.cpp/releases/dow
     cp /tmp/llama_extracted/build/bin/llama-server /build/llama-server && \
     chmod +x /build/llama-server
 
+# v51 fine-tuned GGUF (GitHub release asset — not in git; ~940MB)
+RUN mkdir -p models && \
+    curl -L -o models/qwen2.5-1.5b-v51-q4_k_m.gguf \
+    https://github.com/AmanM006/hybrid_routing/releases/download/v51/qwen2.5-1.5b-v51-q4_k_m.gguf
+
 # Stage 2: Final runtime image
 FROM --platform=linux/amd64 python:3.11-slim
 
@@ -43,8 +48,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=builder /opt/venv /opt/venv
 COPY --from=builder /build/llama-server /usr/local/bin/llama-server
 
-# v51 fine-tuned local model (Colab LoRA + GGUF export)
-COPY models/qwen2.5-1.5b-v51-q4_k_m.gguf /app/models/qwen2.5-1.5b-v51-q4_k_m.gguf
+# v51 fine-tuned local model (downloaded in builder stage)
+COPY --from=builder /build/models/qwen2.5-1.5b-v51-q4_k_m.gguf /app/models/qwen2.5-1.5b-v51-q4_k_m.gguf
 
 # Copy source python modules
 COPY main.py classifier.py validators.py client.py deterministic_solvers.py ./
