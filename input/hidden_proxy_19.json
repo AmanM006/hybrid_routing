@@ -1,0 +1,21 @@
+[
+  {"task_id": "hp-f01", "prompt": "In plain prose: what are the three additive primary colors on a computer monitor, and why do displays use them instead of paint primaries?"},
+  {"task_id": "hp-f02", "prompt": "Explain how machine learning and deep learning differ, including how features are handled in each approach."},
+  {"task_id": "hp-f03", "prompt": "Describe RAM versus ROM and what each is used for in a typical computer."},
+  {"task_id": "hp-m01", "prompt": "A store receives 120 units Monday, 85 Tuesday, 140 Wednesday, and ships 73 Thursday. How many units remain?"},
+  {"task_id": "hp-m02", "prompt": "If 1.25 cups of sugar make 20 cookies, how many cups are needed for 30 cookies when sugar costs $2.40 per cup? Include total cost."},
+  {"task_id": "hp-s01", "prompt": "Classify sentiment with a brief reason: 'Delivery was late but the product works flawlessly.'"},
+  {"task_id": "hp-s02", "prompt": "What sentiment fits this? 'The packaging was damaged yet the device inside is perfect.'"},
+  {"task_id": "hp-sum01", "prompt": "Summarize in exactly two sentences, covering both benefits and challenges: Remote work cuts commuting and adds flexibility, but many workers feel isolated and struggle to separate work from home life."},
+  {"task_id": "hp-sum02", "prompt": "Provide three bullet points (max 15 words each) covering a benefit, a challenge, and a response: City pilots curbside composting to cut landfill waste; residents worry about odors; the city adds sealed bins and weekly pickup."},
+  {"task_id": "hp-ner01", "prompt": "Extract all named entities with types from: On March 15 2023, Sundar Pichai said Google would partner with ETH Zurich on AI safety research in Zurich."},
+  {"task_id": "hp-ner02", "prompt": "List PERSON, ORGANIZATION, LOCATION, and DATE entities in JSON from: Serena Williams won at Wimbledon in London in 2012."},
+  {"task_id": "hp-l01", "prompt": "Mia, Noah, and Priya each drink coffee, tea, or juice. Mia avoids juice. Noah drinks tea. What does Priya drink?"},
+  {"task_id": "hp-l02", "prompt": "You flip a fair coin three times and see heads each time. What is the probability the next flip is heads? Answer as a fraction."},
+  {"task_id": "hp-c01", "prompt": "Write a Python function `total(nums)` that returns the sum of a list of numbers."},
+  {"task_id": "hp-c02", "prompt": "Implement binary search on a sorted list in Python as function `bsearch(arr, target)` returning the index or -1."},
+  {"task_id": "hp-d01", "prompt": "Debug this Python function — it should sum a list but returns 0 for non-empty input:\n```python\ndef total(nums):\n    s = 0\n    for n in nums:\n        s = n\n    return s\n```"},
+  {"task_id": "hp-d02", "prompt": "Fix the edge case when `arr` is empty in this binary search:\n```python\ndef bsearch(arr, target):\n    lo, hi = 0, len(arr) - 1\n    while lo <= hi:\n        mid = (lo + hi) // 2\n        if arr[mid] == target:\n            return mid\n        elif arr[mid] < target:\n            lo = mid + 1\n        else:\n            hi = mid - 1\n    return -1\n```"},
+  {"task_id": "hp-f04", "prompt": "What does DNS stand for in computer networking?"},
+  {"task_id": "hp-s03", "prompt": "Sentiment label and reason for: 'Absolutely love the camera quality; hate how hot the phone gets during calls.'"}
+]

@@ -11,7 +11,7 @@ os.environ["ALLOWED_MODELS"] = "accounts/fireworks/models/llama-v3p1-8b-instruct
 
 from classifier import classify_prompt
 from validators import validate_category_output, coerce_ner_output
-from client import FireworksClient, get_emergency_fallback, get_max_tokens
+from client import FireworksClient, RemoteBudgetExhausted, get_emergency_fallback, get_max_tokens
 from deterministic_solvers import solve_ner_deterministically, solve_sentiment_deterministically, solve_logic_deterministically
 from main import classify_model_roles
 import main
@@ -229,6 +229,55 @@ class TestGeneralPurposeAgent(unittest.IsolatedAsyncioTestCase):
         client._record_usage(MagicMock(usage=None), "minimax-m3", "factual_knowledge")
         self.assertEqual(client.total_calls, 1)
 
+    def test_remote_budget_exhausted_raises(self):
+        client = FireworksClient("fake", "https://example.invalid", max_remote_calls=1)
+        asyncio.run(client._acquire_remote_budget("factual_knowledge", True))
+        with self.assertRaises(RemoteBudgetExhausted):
+            asyncio.run(client._acquire_remote_budget("factual_knowledge", True))
+        # Code categories bypass budget
+        asyncio.run(client._acquire_remote_budget("code_generation", True))
+
+    async def test_easy_cascade_escalates_on_validation_fail(self):
+        """Cheap returns invalid text → mid must be tried (v49 bug regression)."""
+        from client import RemoteBudgetExhausted
+        import main as main_mod
+
+        prompt = "Explain the difference between RAM and ROM in a computer."
+        roles = {
+            "code": "kimi-code",
+            "reasoning": "minimax-m3",
+            "cheap": "gemma-cheap",
+            "mid": "minimax-m3",
+        }
+        calls: list[str] = []
+
+        async def fake_call_api(model, category, prompt, timeout=12.0, max_tokens_override=None, count_toward_budget=True):
+            calls.append(model)
+            if len(calls) == 1:
+                return prompt  # echo fails factual validator (matches prompt)
+            return (
+                "RAM is volatile memory used for active programs and data while the system runs. "
+                "ROM is non-volatile memory that stores firmware and boot instructions permanently."
+            )
+
+        mock_client = AsyncMock()
+        mock_client.call_api = fake_call_api
+        mock_client.total_fireworks_tokens = MagicMock(return_value=100)
+        mock_client._scrub_cot = lambda t, c: t
+        mock_client._enforce_summary_format = lambda t, p: t
+
+        local_sem = asyncio.Semaphore(1)
+        remote_sem = asyncio.Semaphore(4)
+
+        with patch.object(main_mod, "local_disabled", True):
+            with patch.object(main_mod, "classify_prompt", return_value="factual_knowledge"):
+                result = await main_mod.execute_task_pipeline(
+                    "T-test", prompt, roles, mock_client, local_sem, remote_sem
+                )
+
+        self.assertGreaterEqual(len(calls), 2, f"Expected cascade escalation, got calls={calls}")
+        self.assertIn("RAM", result["answer"])
+
     def test_mixed_sentiment_deterministic(self):
         prompt = (
             "What's the overall sentiment here? "
@@ -330,7 +379,7 @@ class TestGeneralPurposeAgent(unittest.IsolatedAsyncioTestCase):
 
     def test_token_budget_for_explanatory_factual_and_two_sentence_summary(self):
         explain = "Explain the difference between RAM and ROM in a computer."
-        self.assertEqual(get_max_tokens("factual_knowledge", explain), 220)
+        self.assertEqual(get_max_tokens("factual_knowledge", explain), 250)
         self.assertEqual(get_max_tokens("factual_knowledge", "What is gravity?"), 100)
         two_sent = "Summarize the following passage in exactly two sentences: 'Long text here.'"
         self.assertEqual(get_max_tokens("summarization", two_sent), 160)

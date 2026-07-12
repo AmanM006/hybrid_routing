@@ -27,10 +27,6 @@ RUN curl -L -o /tmp/llama.zip https://github.com/ggml-org/llama.cpp/releases/dow
     cp /tmp/llama_extracted/build/bin/llama-server /build/llama-server && \
     chmod +x /build/llama-server
 
-# Download local model file
-RUN mkdir -p models && \
-    curl -L -o models/qwen2.5-1.5b-instruct-q4_k_m.gguf https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf
-
 # Stage 2: Final runtime image
 FROM --platform=linux/amd64 python:3.11-slim
 
@@ -43,20 +39,26 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy the prepared virtual environment, model file, and server binary from builder
+# Copy the prepared virtual environment and server binary from builder
 COPY --from=builder /opt/venv /opt/venv
-COPY --from=builder /build/models /app/models
 COPY --from=builder /build/llama-server /usr/local/bin/llama-server
+
+# v51 fine-tuned local model (Colab LoRA + GGUF export)
+COPY models/qwen2.5-1.5b-v51-q4_k_m.gguf /app/models/qwen2.5-1.5b-v51-q4_k_m.gguf
 
 # Copy source python modules
 COPY main.py classifier.py validators.py client.py deterministic_solvers.py ./
 
 # Set paths and python environment variables
 ENV PATH="/opt/venv/bin:$PATH"
-# v49 top-1: skip healthcheck (-184 tokens), local concurrency=1
+# v51 Strategy A: skip healthcheck, gated local, remote budget, fine-tuned GGUF support
 ENV SKIP_HEALTHCHECK=true
 ENV MAX_LOCAL_CONCURRENCY=1
+ENV MAX_REMOTE_CONCURRENCY=4
 ENV LLAMA_THREADS=2
+ENV LOCAL_MODEL_GGUF=qwen2.5-1.5b-v51-q4_k_m.gguf
+# Fine-tuned local handles summarization + factual (proxy: factual 4/4, ~1.4k tokens saved)
+ENV LOCAL_ALLOWED_CATEGORIES=summarization,factual_knowledge
 
 # Set the standard entrypoint
 ENTRYPOINT ["python", "main.py"]

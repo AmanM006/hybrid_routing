@@ -1107,35 +1107,17 @@ def _extract_review_text(prompt: str) -> str:
 
 def _solve_sentiment_deterministically(prompt: str):
     """
-    High-confidence sentiment only. Returns None when ambiguous.
+    High-confidence mixed sentiment only — both positive and negative cues with
+    an explicit contrast marker. Returns None when ambiguous.
     """
     pl = prompt.lower()
     if not re.search(r"\b(sentiment|classify|label|tone)\b", pl):
         return None
+    if not re.search(r"\b(but|however|though|although|yet|while|honestly)\b", pl):
+        return None
     review = _extract_review_text(prompt)
     has_pos = any(cue in review for cue in _POS_CUES)
     has_neg = any(cue in review for cue in _NEG_CUES)
-
-    # Positive-only — no negative cues
-    if has_pos and not has_neg:
-        if re.search(r"\b(perfect|recommend|shipped on time|incredible|warm)\b", review):
-            logger.info("[DETERM-SENT] High-confidence positive sentiment")
-            return "Positive because the text expresses clear satisfaction and approval."
-
-    # Neutral — explicit neither/nor phrasing
-    if re.search(r"\bneither\b.{0,40}\bnor\b", review) or "what it is" in review:
-        logger.info("[DETERM-SENT] High-confidence neutral sentiment")
-        return "Neutral because the text expresses neither strong positive nor negative feelings."
-
-    # Mixed with love/hate or semicolon contrast (no but required)
-    if has_pos and has_neg:
-        if re.search(r"\b(love|like)\b", review) and re.search(r"\b(hate|poor|dies|bad)\b", review):
-            logger.info("[DETERM-SENT] High-confidence mixed sentiment (love/hate)")
-            return "Mixed because the text praises one aspect but criticizes another."
-
-    # Mixed with explicit contrast marker
-    if not re.search(r"\b(but|however|though|although|yet|while|honestly)\b", pl):
-        return None
     if not (has_pos and has_neg):
         return None
     neg_p = next((phrase for cue, phrase in _NEG_PHRASES if cue in review), None)
@@ -1153,91 +1135,5 @@ def solve_sentiment_deterministically(prompt: str):
         return _solve_sentiment_deterministically(prompt)
     except Exception:
         logger.exception("[DETERM-SENT] Unexpected error — falling through")
-        return None
-
-
-# ---------------------------------------------------------------------------
-# FACTUAL TRIVIA SOLVER (closed-book only — never guess on explanatory prompts)
-# ---------------------------------------------------------------------------
-
-_EXPLANATORY_FACTUAL = re.compile(
-    r"\b(explain|describe|difference|compare|how each|how do|how does|why |"
-    r"what is the difference|briefly explain|in detail)\b",
-    re.IGNORECASE,
-)
-
-_TRIVIA_PATTERNS: list[tuple[re.Pattern, str]] = [
-    (re.compile(r"chemical symbol for gold|symbol for gold\b", re.I), "Au"),
-    (re.compile(r"(?:which|what)\s+planet.*red planet|known as the red planet", re.I), "Mars"),
-    (re.compile(r"what does dns stand for|dns stand for", re.I), "Domain Name System"),
-    (re.compile(r"who wrote(?: the novel)?\s+['\"]1984['\"]", re.I), "George Orwell"),
-]
-
-
-def _solve_factual_deterministically(prompt: str):
-    pl = prompt.lower().strip()
-    if _EXPLANATORY_FACTUAL.search(pl):
-        return None
-    if "?" not in prompt and not pl.endswith("."):
-        return None
-    for pattern, answer in _TRIVIA_PATTERNS:
-        if pattern.search(pl):
-            logger.info(f"[DETERM-FACT] trivia match → {answer!r}")
-            return answer
-    return None
-
-
-def solve_factual_deterministically(prompt: str):
-    """Public wrapper — never raises; returns None on any error."""
-    try:
-        return _solve_factual_deterministically(prompt)
-    except Exception:
-        logger.exception("[DETERM-FACT] Unexpected error — falling through")
-        return None
-
-
-# ---------------------------------------------------------------------------
-# CODE DEBUG SOLVER (known bug shapes only)
-# ---------------------------------------------------------------------------
-
-def _solve_code_debug_deterministically(prompt: str):
-    pl = prompt.lower()
-    if "def total" in pl and "s = n" in pl and "for n in nums" in pl:
-        logger.info("[DETERM-CODE] accumulator bug fix")
-        return (
-            "```python\n"
-            "def total(nums):\n"
-            "    s = 0\n"
-            "    for n in nums:\n"
-            "        s += n\n"
-            "    return s\n"
-            "```"
-        )
-    if "bsearch" in pl and "empty" in pl:
-        logger.info("[DETERM-CODE] binary search empty-input guard")
-        return (
-            "```python\n"
-            "def bsearch(a, x):\n"
-            "    if not a:\n"
-            "        return -1\n"
-            "    lo, hi = 0, len(a)\n"
-            "    while lo < hi:\n"
-            "        mid = (lo + hi) // 2\n"
-            "        if a[mid] < x:\n"
-            "            lo = mid + 1\n"
-            "        else:\n"
-            "            hi = mid\n"
-            "    return lo\n"
-            "```"
-        )
-    return None
-
-
-def solve_code_debug_deterministically(prompt: str):
-    """Public wrapper — never raises; returns None on any error."""
-    try:
-        return _solve_code_debug_deterministically(prompt)
-    except Exception:
-        logger.exception("[DETERM-CODE] Unexpected error — falling through")
         return None
 

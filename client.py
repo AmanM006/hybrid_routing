@@ -63,7 +63,7 @@ def get_max_tokens(category: str, prompt: str) -> int:
     Returns appropriate max_tokens constraint based on category and prompt constraints.
     """
     if category == "named_entity_recognition":
-        return 100
+        return 120
     elif category == "sentiment_classification":
         return 55
     elif category == "summarization":
@@ -83,16 +83,14 @@ def get_max_tokens(category: str, prompt: str) -> int:
             r"\b(explain|describe|difference|compare|briefly|how (?:each|each works|do|does)|what is the difference)\b",
             prompt_lower,
         ):
-            if re.search(r"machine learning.*deep learning|deep learning.*machine learning", prompt_lower):
-                return 240
-            return 220
+            return 250
         return 100
     elif category == "math_reasoning":
         return 120
     elif category == "logical_reasoning":
-        return 180
+        return 220
     elif category in ["code_generation", "code_debugging"]:
-        return 300
+        return 380
     return 100
 
 def get_user_prompt_suffix(category: str, prompt: str) -> str:
@@ -121,13 +119,7 @@ def get_user_prompt_suffix(category: str, prompt: str) -> str:
                 return f"\n\nExactly {n} complete sentences."
         return "\n\nSummary:"
     if category == "factual_knowledge":
-        pl = prompt.lower()
-        suffix = "\n\nPlain prose. No markdown."
-        if re.search(r"machine learning.*deep learning|deep learning.*machine learning", pl):
-            suffix += (
-                " Use the exact phrases manual feature engineering and automatic feature extraction."
-            )
-        return suffix
+        return "\n\nPlain prose. No markdown."
     return "\n\nAnswer only."
 
 def get_emergency_fallback(category: str, prompt: str) -> str:
@@ -211,8 +203,14 @@ def get_emergency_fallback(category: str, prompt: str) -> str:
         
     return "Fallback response."
 
+class RemoteBudgetExhausted(Exception):
+    """Raised when MAX_REMOTE_CALLS budget is exhausted for non-priority categories."""
+
+
 class FireworksClient:
-    def __init__(self, api_key: str, base_url: str):
+    PRIORITY_CATEGORIES = frozenset({"code_generation", "code_debugging"})
+
+    def __init__(self, api_key: str, base_url: str, max_remote_calls: int | None = None):
         self.api_key = api_key
         self.base_url = base_url
         self.client = AsyncOpenAI(
@@ -222,6 +220,9 @@ class FireworksClient:
         self.total_prompt_tokens = 0
         self.total_completion_tokens = 0
         self.total_calls = 0
+        self.max_remote_calls = max_remote_calls
+        self._remote_task_calls = 0
+        self._budget_lock = asyncio.Lock()
 
     def total_fireworks_tokens(self) -> int:
         return self.total_prompt_tokens + self.total_completion_tokens
@@ -358,6 +359,18 @@ class FireworksClient:
         return text
 
 
+    async def _acquire_remote_budget(self, category: str, count_toward_budget: bool) -> None:
+        if not count_toward_budget or self.max_remote_calls is None:
+            return
+        async with self._budget_lock:
+            if category in self.PRIORITY_CATEGORIES:
+                return
+            if self._remote_task_calls >= self.max_remote_calls:
+                raise RemoteBudgetExhausted(
+                    f"Remote budget exhausted ({self.max_remote_calls} calls); category={category}"
+                )
+            self._remote_task_calls += 1
+
     async def call_api(
         self,
         model: str,
@@ -365,11 +378,14 @@ class FireworksClient:
         prompt: str,
         timeout: float = 12.0,
         max_tokens_override: int | None = None,
+        count_toward_budget: bool = True,
     ) -> str:
         """
         Sends a request to the Fireworks API with identical prefixes, zero temperature,
         max_tokens caps, and an automatic retry on failure.
         """
+        await self._acquire_remote_budget(category, count_toward_budget)
+
         # Ensure model is fully qualified with accounts/fireworks/models/ prefix
         if "/" not in model:
             model = f"accounts/fireworks/models/{model}"
