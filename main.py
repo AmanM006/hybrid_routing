@@ -69,8 +69,11 @@ def start_local_server() -> subprocess.Popen:
         
     try:
         logger.info(f"Launching local llama-server from: {binary} using {MODEL_PATH}...")
+        # 2 threads matches the 2-vCPU grading environment; more threads oversubscribe
+        # the CPU and slow every request down.
+        threads = os.environ.get("LLAMA_THREADS", "2")
         proc = subprocess.Popen(
-            [binary, "-m", MODEL_PATH, "--port", "8085", "-c", "1024", "-t", "4"],
+            [binary, "-m", MODEL_PATH, "--port", "8085", "-c", "1024", "-t", threads],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL
         )
@@ -111,7 +114,10 @@ async def call_local_model(system_prompt: str, user_prompt: str, max_tokens: int
     
     async with aiohttp.ClientSession() as session:
         try:
-            async with session.post(url, json=payload, timeout=15.0) as resp:
+            # llama-server runs a single slot on 2 vCPU; a serialized call can
+            # legitimately take 20-40s. 15s caused every factual task to time out
+            # and escalate to Fireworks even though the local answer was coming.
+            async with session.post(url, json=payload, timeout=45.0) as resp:
                 if resp.status == 200:
                     data = await resp.json()
                     return data["choices"][0]["message"]["content"].strip()
@@ -829,7 +835,10 @@ async def main():
     proc = start_local_server()
     
     # 5. Run tasks concurrently
-    max_local_concurrency = int(os.environ.get("MAX_LOCAL_CONCURRENCY", "3"))
+    # Local llama-server has a single slot: concurrent requests queue behind each
+    # other and blow the per-call timeout. Serialize local work so each call gets
+    # the full CPU budget; remote calls stay parallel.
+    max_local_concurrency = int(os.environ.get("MAX_LOCAL_CONCURRENCY", "1"))
     max_remote_concurrency = int(os.environ.get("MAX_REMOTE_CONCURRENCY", "4"))
 
     
